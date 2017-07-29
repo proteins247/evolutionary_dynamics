@@ -1,0 +1,9 @@
+#!/bin/bash
+#SBATCH -t 0-0:20
+#SBATCH -p shakhnovich
+#SBATCH --mem-per-cpu 30
+#SBATCH --array 5000-9999
+#SBATCH -o %A_%a.err
+
+
+./protein-design.exe 1 100 5 1 2 $SLURM_ARRAY_TASK_ID
