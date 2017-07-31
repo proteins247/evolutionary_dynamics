@@ -1,9 +1,10 @@
 /*
- Protein design on 3x3x3 lattice proteins
- monomers and dimers
- monoclonal evolution 
- employs Kimura theory as the Metropolis criterion
-*/
+ * Protein design on 3x3x3 lattice proteins
+ * monomers and dimers
+ * monoclonal evolution 
+ * employs Kimura theory as the Metropolis criterion
+ *      Author: rrazban
+ */
 
 #include <stdio.h>
 #include <math.h>
@@ -16,10 +17,11 @@
 
 
 #include "zlib.h"
-#include "../src/gencode.h"
-#include "../src/latticelib.h"
-#include "../src/bindinglib.h"
-#include "../RNG/generator.h"
+#include "../gencode.h"
+#include "../latticelib.h"
+#include "../bindinglib.h"
+#include "../rng.h"
+#include "../rng/generator.h"
 
 #define GENES 		2
 
@@ -275,6 +277,8 @@ int main(int argc, char *argv[]){
 
 	printf("Finding stabilizing mutations...\n");
 	init_KISS();	//initialize random number generator
+	set_threefry_array(12345); /* victor: initialize threefry rng */
+	
 
 	for(ii=1; ii<pow(10, sim_time); ii++){
 		if (protein==2){
