@@ -10,7 +10,7 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include"gencode.h"
-#include"../RNG/generator.h"
+#include"rng/generator.h"
 // U C A G -> 0 1 2 3
 
 

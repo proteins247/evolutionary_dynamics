@@ -9,7 +9,7 @@
 #include<string.h>
 
 #include"latticelib.h"
-#include"../RNG/generator.h"
+#include"rng/generator.h"
 
 // global variables
 int ContactMatrixLen[NUMCONF]; // actually, useless
