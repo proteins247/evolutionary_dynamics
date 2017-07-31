@@ -3,13 +3,8 @@
  basic routines for handling 3x3x3 compact 27-mers
  (c) 2005 K.Zeldovich kzeldov@fas.harvard.edu
  */
-#include<stdio.h>
-#include<math.h>
-#include<stdlib.h>
-#include<string.h>
-
-#include"latticelib.h"
-#include"rng/generator.h"
+#include "latticelib.h"
+#include "rng.h"
 
 // global variables
 int ContactMatrixLen[NUMCONF]; // actually, useless
@@ -217,9 +212,7 @@ void CreateRandomSequence(int *Seq, int Len)
     int i,j;
     for(i=0;i<Len;i++)
     {
-        do{
-            j = (int)( ((double)JKISS()/THE_MAX) * ALPHABET );
-        } while(j==ALPHABET);
+        j = (int)( threefryrand() * ALPHABET );
         Seq[i] = j;
     }
     return;
@@ -376,15 +369,11 @@ void PointMutateAASequence(int *Seq, int Len)
     int i,j;
     //int k;
     
-    do{
-        j = (int)( ((double)JKISS()/THE_MAX) * Len );
-    } while(j==Len);
-    
+    j = (int)( threefryrand() * Len );
+        
     do
     {
-        do{
-            i = (int)( ((double)JKISS()/THE_MAX) * ALPHABET );
-        } while(i==ALPHABET);
+        i = (int)( threefryrand() * ALPHABET );
     }
     while(Seq[j]==i);
     Seq[j]=i;
@@ -401,13 +390,11 @@ void SwapTwoResidues(int *Seq, int Len)
 {
     int i,j,k;
     
-    do{
-        i = (int)( ((double)JKISS()/THE_MAX) * Len );
-    } while(i==Len);
+    i = (int)( threefryrand() * Len );
     
-    do{
-        j = (int)( ((double)JKISS()/THE_MAX) * Len );
-    } while((j==Len)||(j==i));
+    do {
+        j = (int)( threefryrand() * Len );
+    } while (j==i);
     
     k = Seq[i]; Seq[i]=Seq[j]; Seq[j]=k;
     
@@ -461,7 +448,7 @@ double MutateAASeqForMaxPnat(int *aaseq, double Tenv, double Tsel)
             //        if (fabs(e1-targetpnat)<0.01) { attempt=MCATTEMPT+1;}
         }
         else { // Pnat decreased - run MC game
-            r = (double)JKISS()/THE_MAX;
+            r = threefryrand();
             if ( r < exp((e1-e0)/Tsel) ) //accept
             { e0 = e1;  CopySeq(aaseq2, aaseq3, AASEQLEN);
                 //        if (struct1!=struct2) { struct1=struct2; fprintf(globaloutfile,"%d %d\n",attempt, attempt-changetime);  changetime = attempt; }
@@ -515,7 +502,7 @@ double SwapResiduesForMinE(int *aaseq,  double Tsel)
             e0 = e1; CopySeq(aaseq2, aaseq3, AASEQLEN);
         }
         else { // energy inreased - run MC game
-            r = (double)JKISS()/THE_MAX;
+            r = threefryrand();
             if ( r < exp(-(e1-e0)/Tsel) ) //accept
             { e0 = e1;  CopySeq(aaseq2, aaseq3, AASEQLEN);  }
         }
