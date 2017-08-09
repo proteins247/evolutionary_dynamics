@@ -14,11 +14,9 @@
 // U C A G -> 0 1 2 3
 
 
-int TripletToAA(unsigned short int triplet)
+static AminoAcid TripletToAA(Codon triplet)
 {
-    int out;
-
-    out = -2;
+    int out = -2;
 
     switch(triplet)
     {
@@ -113,7 +111,7 @@ int TripletToAA(unsigned short int triplet)
 
 //printf("dec %.3x to %d\n",triplet,out);
 
-    if (out==-2)
+    if (out == -2)
     {
         fprintf(stderr,"genetic code error\n");
         fprintf(stderr,"triplet: %.3x\n",triplet);
@@ -123,142 +121,215 @@ int TripletToAA(unsigned short int triplet)
 }
 
 
+static Codon AAtoCodon(AminoAcid aa, int random)
+{
+    int end = -1;
+    int codons[6] = {end};      /* max six codons for aa */
+    int num_codons = 0;
+
+    switch (aa)
+    {
+    case A_Cys: {
+        codons[1] = N_UGU;
+        codons[0] = N_UGC;
+        break; }
+    case A_Met: {
+        codons[0] = N_AUG;
+        break; }
+    case A_Phe: {
+        codons[0] = N_UUU;
+        codons[1] = N_UUC;
+        break; }
+    case A_Ile: {
+        codons[0] = N_AUU;
+        codons[1] = N_AUC;
+        codons[2] = N_AUA;
+        break; }
+    case A_Leu: {
+        codons[1] = N_UUA;
+        codons[2] = N_UUG;
+        codons[3] = N_CUU;
+        codons[4] = N_CUC;
+        codons[5] = N_CUA;
+        codons[0] = N_CUG;
+        break; }
+    case A_Val: {
+        codons[1] = N_GUU;
+        codons[2] = N_GUC;
+        codons[3] = N_GUA;
+        codons[0] = N_GUG;
+        break; }
+    case A_Trp: {
+        codons[0] = N_UGG;
+        break; }
+    case A_Tyr: {
+        codons[0] = N_UAU;
+        codons[1] = N_UAC;
+        break; }
+    case A_Ala: {
+        codons[0] = N_GCU;
+        codons[1] = N_GCC;
+        codons[2] = N_GCA;
+        codons[3] = N_GCG;
+        break; }
+    case A_Gly: {
+        codons[0] = N_GGU;
+        codons[1] = N_GGC;
+        codons[2] = N_GGA;
+        codons[3] = N_GGG;
+        break; }
+    case A_Thr: {
+        codons[0] = N_ACU;
+        codons[1] = N_ACC;
+        codons[2] = N_ACA;
+        codons[3] = N_ACG;
+        break; }
+    case A_Ser: {
+        codons[0] = N_UCU;
+        codons[1] = N_UCC;
+        codons[2] = N_UCA;
+        codons[3] = N_UCG;
+        codons[4] = N_AGU;
+        codons[5] = N_AGC;
+        break; }
+    case A_Asn: {
+        codons[0] = N_AAU;
+        codons[1] = N_AAC;
+        break; }
+    case A_Gln: {
+        codons[0] = N_CAA;
+        codons[1] = N_CAG;
+        break; }
+    case A_Asp: {
+        codons[0] = N_GAU;
+        codons[1] = N_GAC;
+        break; }
+    case A_Glu: {
+        codons[0] = N_GAA;
+        codons[1] = N_GAG;
+        break; }
+    case A_His: {
+        codons[0] = N_CAU;
+        codons[1] = N_CAC;
+        break; }
+    case A_Arg: {
+        codons[0] = N_CGU;
+        codons[1] = N_CGC;
+        codons[2] = N_CGA;
+        codons[3] = N_CGG;
+        codons[4] = N_AGA;
+        codons[5] = N_AGG;
+        break; }
+    case A_Lys: {
+        codons[0] = N_AAA;
+        codons[1] = N_AAG;
+        break; }
+    case A_Pro: {
+        codons[0] = N_CCU;
+        codons[1] = N_CCC;
+        codons[2] = N_CCA;
+        codons[3] = N_CCG;
+        break; }
+    case A_STOP: {
+        codons[0] = N_UAA;
+        codons[1] = N_UAG;
+        codons[2] = N_UGA;
+        break; }
+    }
+
+    /* count number of codons for our aa */
+    do
+    {
+        num_codons++;
+    } while (codons[num_codons] != end);
+
+    if (random)
+    {
+        return (Codon)codons[(int)(threefryrand() * num_codons)];
+    }
+    else
+    {
+        return (Codon)codons[0];
+    }
+
+}
+
+
 /* functions in gencode.h: */
 
-void CreateRandomNucSequence(int *Seq, int Len)
+void CreateRandomNucSequence(int *NucSeq, int Len)
 {
-    int i, j;
+    int i, nuc;
     for (i=0; i<Len; i++)
     {
-        j = (int)( threefryrand() * 4 );
-        Seq[i] = j;
+        nuc = (int)( threefryrand() * 4 );
+        NucSeq[i] = nuc;
     }
     return;
 }
+
+
 
 /* 
  * CreateRandomNucSequence2 version avoids stop codons. Len should be
  * the size of Seq and divisible by 3. (this is not checked)
  * 
  */
-void CreateRandomNucSequence2(int *Seq, int Len)
+void CreateRandomNucSequence2(int *NucSeq, int Len)
 {
-    unsigned short int a;
-    unsigned char a1, a2, a3;
-    int i, j, aa;
+    Codon t;
+    AminoAcid aa;
+    unsigned char n1, n2, n3;
+    int i, j, nuc;
     for (i=0; i<Len/3; i++)
     {
         do
         {
             for (j=0; j<3 ;j++)
             {
-                aa = (int)(threefryrand() * 4 );
-                Seq[3*i+j] = aa;
+                nuc = (int)(threefryrand() * 4 );
+                NucSeq[3*i+j] = nuc;
             }
-            a1 = Seq[3*i];
-            a2 = Seq[3*i+1];
-            a3 = Seq[3*i+2];
-            a = 0;
-            a = (a1 << 8 ) | (a2 << 4) | a3;
-            aa = TripletToAA(a);
+            n1 = NucSeq[3*i];
+            n2 = NucSeq[3*i+1];
+            n3 = NucSeq[3*i+2];
+            t = 0;
+            t = (n1 << 8 ) | (n2 << 4) | n3;
+            aa = TripletToAA(t);
             //printf(" %x %x %x -> 0x%.4x\n",a1,a2,a3, a);
         } while (aa == A_STOP);
     }
     return;
 }
 
-int PointMutateNucSequence(int *Seq, int Len)
+
+int NucSeqToAASeq(int *NucSeq, int N, AminoAcid *AASeq)
 {
-    int i,j,k;
-    int AAS1[10000], AAS2[10000];
-
-    NucSeqToAASeq(Seq, Len, AAS1);
-
-    j = (int)( threefryrand() * Len );
-
-    do
-    {
-        i = (int)( threefryrand() * 4 );
-    } while (Seq[j] == i); /* Keep on going until mrna is changed */
-
-    Seq[j] = i;
-
-
-    k = NucSeqToAASeq(Seq, Len, AAS2);
-
-    if (k==1)
-        return -1;
-
-    j = 0;
-    for (i=0; i<Len/3; i++)
-        if (AAS1[i] != AAS2[i])
-        {
-            j=1;
-            break;
-        }
-
-    return j;
-}
-
-
-
-int PointMutateCharNucSequence(char *Seq, int Len)
-{
-    int i,j,k;
-    int AAS1[10000], AAS2[10000];
-
-    CharNucSeqToAASeq(Seq, Len, AAS1);
-
-    j = (int)( threefryrand() * Len );
-
-    do
-    {
-        i = (int)( threefryrand() * 4 );
-    } while(Seq[j]==i);
-    Seq[j] = i;
-
-    k = CharNucSeqToAASeq(Seq, Len, AAS2);
-
-    if (k==1)
-        return -1;
-
-    j = 0;
-    for (i=0; i<Len/3; i++)
-        if (AAS1[i] != AAS2[i])
-        {
-            j=1;
-            break;
-        }
-    return j;
-}
-
-int NucSeqToAASeq(int *NucSeq, int N, int *AASeq)
-{
-    unsigned short int a;
-    unsigned char a1, a2, a3;
-    int k=0, i ,j=0;
+    Codon t;
+    unsigned char n1, n2, n3;
+    int k=0, i, j=0;
 
     for (i=0; i<N; i+=3)
     {
-        a1 = NucSeq[i];
-        a2 = NucSeq[i+1];
-        a3 = NucSeq[i+2];
+        n1 = NucSeq[i];
+        n2 = NucSeq[i+1];
+        n3 = NucSeq[i+2];
 
-        a = 0;
-        a = (a1 << 8 ) | (a2 << 4) | a3;
+        t = 0;
+        t = (n1 << 8 ) | (n2 << 4) | n3;
 
 //printf(" %x %x %x -> 0x%.4x\n",a1,a2,a3, a);
 
-        AASeq[j] = TripletToAA(a);
-        if (AASeq[j]==-1)
+        AASeq[j] = TripletToAA(t);
+        if (AASeq[j] == A_STOP)
         {
 //fprintf(stderr,"%.3x to stop\n",a);*/
-            k=1;
+            k = -1;
         }
-        if (AASeq[j]==-2)
+        if (AASeq[j] == -2)
         {
             fprintf(stderr,"NucSeqToAASeq() : Genetic Code Error!!!\n");
-            exit(0);
+            exit(1);
         }
         j++;
     }
@@ -267,34 +338,34 @@ int NucSeqToAASeq(int *NucSeq, int N, int *AASeq)
 }
 
 
-
-int CharNucSeqToAASeq(char *NucSeq, int N, int *AASeq)
+/* This function only differs from above in that NucSeqToAASeq is char * */
+int CharNucSeqToAASeq(char *NucSeq, int N, AminoAcid *AASeq)
 {
-    unsigned short int a;
-    unsigned char a1, a2, a3;
-    int k=0,i,j=0;
+    Codon t;
+    unsigned char n1, n2, n3;
+    int k=0, i, j=0;
 
-    for(i=0;i<N;i+=3)
+    for (i=0; i<N; i+=3)
     {
-        a1 = NucSeq[i];
-        a2 = NucSeq[i+1];
-        a3 = NucSeq[i+2];
+        n1 = NucSeq[i];
+        n2 = NucSeq[i+1];
+        n3 = NucSeq[i+2];
 
-        a = 0;
-        a = (a1 << 8 ) | (a2 << 4) | a3;
+        t = 0;
+        t = (n1 << 8 ) | (n2 << 4) | n3;
 
 //printf(" %x %x %x -> 0x%.4x\n",a1,a2,a3, a);
 
-        AASeq[j] = TripletToAA(a);
-        if (AASeq[j] == -1)
+        AASeq[j] = TripletToAA(t);
+        if (AASeq[j] == A_STOP)
         {
 //fprintf(stderr,"%.3x to stop\n",a);*/
-            k=1;
+            k = -1;
         }
-        if (AASeq[j]==-2)
+        if (AASeq[j] == -2)
         {
             fprintf(stderr,"CharNucSeqToAASeq() : Genetic Code Error!!!\n");
-            //exit(0);
+            exit(1);
         }
         j++;
     }
@@ -303,7 +374,99 @@ int CharNucSeqToAASeq(char *NucSeq, int N, int *AASeq)
 }
 
 
-void PrintAASequence(char *buf, int *Seq, int Len)
+int AASeqToNucSeq(AminoAcid * AASeq, int * NucSeq, int AALen, int random)
+{
+    Codon c;
+    unsigned char n1, n2, n3;
+    int i;
+
+    for (i=0; i<AALen*3; i+=3)
+    {
+        c = AAtoCodon(AASeq[i], random);
+        n1 = (c & 0x0f00) >> 8;
+        n2 = (c & 0x00f0) >> 4;
+        n3 = (c & 0x000f);
+        NucSeq[i] = n1;
+        NucSeq[i+1] = n2;
+        NucSeq[i+2] = n3;
+    }
+
+    return 0;
+}
+
+
+int PointMutateNucSequence(int *NucSeq, int Len)
+{
+    int i, j, k;
+    AminoAcid AAS1[10000], AAS2[10000];
+
+    NucSeqToAASeq(NucSeq, Len, AAS1);
+
+    /* Select a nucleotide */
+    j = (int)( threefryrand() * Len );
+
+    /* Keep on going until nucleotide is changed */
+    do
+    {
+        i = (int)( threefryrand() * 4 );
+    } while (NucSeq[j] == i);
+
+    NucSeq[j] = i;
+
+    /* Get the new AA sequence */
+    k = NucSeqToAASeq(NucSeq, Len, AAS2);
+
+    if (k == -1)                 /* mutation to stop codon */
+        return -1;
+
+    j = 0;
+    for (i=0; i<Len/3; i++)
+        if (AAS1[i] != AAS2[i])
+        {
+            j = 1;
+            break;
+        }
+
+    return j;
+}
+
+/* This function only differs from PointMutateNucSequence in that Seq is char * */
+int PointMutateCharNucSequence(char *NucSeq, int Len)
+{
+    int i, j, k;
+    AminoAcid AAS1[10000], AAS2[10000];
+
+    CharNucSeqToAASeq(NucSeq, Len, AAS1);
+
+    /* Select a nucleotide */
+    j = (int)( threefryrand() * Len );
+
+    do
+    {
+        i = (int)( threefryrand() * 4 );
+    } while (NucSeq[j] == i);
+
+    NucSeq[j] = i;
+
+    /* Get the new AA sequence */
+    k = CharNucSeqToAASeq(NucSeq, Len, AAS2);
+
+    if (k == -1)
+        return -1;
+
+    j = 0;
+    for (i=0; i<Len/3; i++)
+        if (AAS1[i] != AAS2[i])
+        {
+            j = 1;
+            break;
+        }
+
+    return j;
+}
+
+
+void PrintAASequence(char *buf, AminoAcid *Seq, int Len)
 {
     int i;
     char c;
@@ -312,76 +475,90 @@ void PrintAASequence(char *buf, int *Seq, int Len)
         c = 'Z';
         switch (Seq[i])
         {
-        case  0: { c = 'C'; break; }
-        case  1: { c = 'M'; break; }
-        case  2: { c = 'F'; break; }
-        case  3: { c = 'I'; break; }
-        case  4: { c = 'L'; break; }
-        case  5: { c = 'V'; break; }
-        case  6: { c = 'T'; break; }
-        case  7: { c = 'Y'; break; }
-        case  8: { c = 'A'; break; }
-        case  9: { c = 'G'; break; }
-        case 10: { c = 'T'; break; }
-        case 11: { c = 'S'; break; }
-        case 12: { c = 'N'; break; }
-        case 13: { c = 'Q'; break; }
-        case 14: { c = 'D'; break; }
-        case 15: { c = 'E'; break; }
-        case 16: { c = 'H'; break; }
-        case 17: { c = 'R'; break; }
-        case 18: { c = 'K'; break; }
-        case 19: { c = 'P'; break; }
+        case A_Cys: { c = 'C'; break; }
+        case A_Met: { c = 'M'; break; }
+        case A_Phe: { c = 'F'; break; }
+        case A_Ile: { c = 'I'; break; }
+        case A_Leu: { c = 'L'; break; }
+        case A_Val: { c = 'V'; break; }
+        case A_Trp: { c = 'W'; break; }
+        case A_Tyr: { c = 'Y'; break; }
+        case A_Ala: { c = 'A'; break; }
+        case A_Gly: { c = 'G'; break; }
+        case A_Thr: { c = 'T'; break; }
+        case A_Ser: { c = 'S'; break; }
+        case A_Asn: { c = 'N'; break; }
+        case A_Gln: { c = 'Q'; break; }
+        case A_Asp: { c = 'D'; break; }
+        case A_Glu: { c = 'E'; break; }
+        case A_His: { c = 'H'; break; }
+        case A_Arg: { c = 'R'; break; }
+        case A_Lys: { c = 'K'; break; }
+        case A_Pro: { c = 'P'; break; }
+        case A_STOP: { c = '\0'; break; }
+        default: {
+            fprintf(stderr, "PrintAAsequence error: sequence val: %d", Seq[i]);
+            exit(1);
+        }
 
         }
-        buf[i]=c;
+        buf[i] = c;
     }
-    buf[i]=0;
+    buf[i] = 0;
     return;
 }
 
 
-void PrintNucCodeSequence(char *buf, int *Seq, int Len)
-{
-    int i;
-    char c;
-    for(i=0;i<Len;i++)
-    {
-        c = 'Z';
-        switch (Seq[i])
-        {
-        case  0: { c = 'U'; break; }
-        case  1: { c = 'C'; break; }
-        case  2: { c = 'A'; break; }
-        case  3: { c = 'G'; break; }
-        }
-        buf[i]=c;
-    }
-    buf[i]=0;
-    return;
-}
-
-void PrintCharNucCodeSequence(char *buf, char *Seq, int Len)
+/* recall a nucleotide sequence is composed of ints 1,2,3,4 */
+void PrintNucCodeSequence(char *buf, int *NucSeq, int Len)
 {
     int i;
     char c;
     for (i=0; i<Len; i++)
     {
         c = 'Z';
-        switch (Seq[i])
+        switch (NucSeq[i])
         {
         case  0: { c = 'U'; break; }
         case  1: { c = 'C'; break; }
         case  2: { c = 'A'; break; }
         case  3: { c = 'G'; break; }
+        default: {
+            fprintf(stderr, "PrintNucCodeSequence error: untranslatable: %d", NucSeq[i]);
+            exit(1);
         }
-        buf[i]=c;
+        }
+        buf[i] = c;
     }
-    buf[i]=0;
+    buf[i] = 0;
     return;
 }
 
-void LetterToNucCodeSeq(char *buf, int *Seq, int Len)
+void PrintCharNucCodeSequence(char *buf, char *NucSeq, int Len)
+{
+    int i;
+    char c;
+    for (i=0; i<Len; i++)
+    {
+        c = 'Z';
+        switch (NucSeq[i])
+        {
+        case  0: { c = 'U'; break; }
+        case  1: { c = 'C'; break; }
+        case  2: { c = 'A'; break; }
+        case  3: { c = 'G'; break; }
+        default: {
+            fprintf(stderr, "PrintNucCodeSequence error: untranslatable: %d", NucSeq[i]);
+            exit(1);        }
+            
+        }
+        buf[i] = c;
+    }
+    buf[i] = 0;
+    return;
+}
+
+void LetterToNucCodeSeq(char *buf, int *NucSeq, int Len)
 {
     int i;
     int c;
@@ -395,10 +572,47 @@ void LetterToNucCodeSeq(char *buf, int *Seq, int Len)
         case  'A': { c = 2; break; }
         case  'G': { c = 3; break; }
         }
-        Seq[i] = c;
+        NucSeq[i] = c;
 
     }
     return;
+}
+
+
+void LetterToAASeq(char *buf, AminoAcid *Seq, int Len)
+{
+    int i;
+    AminoAcid a;
+    for (i=0; i<Len; i++)
+    {
+        switch (buf[i])
+        {
+        case 'C': { a = A_Cys; break; }
+        case 'M': { a = A_Met; break; }
+        case 'F': { a = A_Phe; break; }
+        case 'I': { a = A_Ile; break; }
+        case 'L': { a = A_Leu; break; }
+        case 'V': { a = A_Val; break; }
+        case 'W': { a = A_Trp; break; }
+        case 'Y': { a = A_Tyr; break; }
+        case 'A': { a = A_Ala; break; }
+        case 'G': { a = A_Gly; break; }
+        case 'T': { a = A_Thr; break; }
+        case 'S': { a = A_Ser; break; }
+        case 'N': { a = A_Asn; break; }
+        case 'Q': { a = A_Gln; break; }
+        case 'D': { a = A_Asp; break; }
+        case 'E': { a = A_Glu; break; }
+        case 'H': { a = A_His; break; }
+        case 'R': { a = A_Arg; break; }
+        case 'K': { a = A_Lys; break; }
+        case 'P': { a = A_Pro; break; }
+        default: {
+            fprintf(stderr, "LetterToAASeq error: sequence char: %c", buf[i]);
+            exit(1); }
+        }
+        Seq[i] = a;
+    }
 }
 
 
