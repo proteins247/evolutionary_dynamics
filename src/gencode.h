@@ -141,10 +141,11 @@ int CharNucSeqToAASeq(char *NucSeq, int N, AminoAcid *AASeq);
 
 /*
  * AASeqToNucSeq
- * Reverse translate aa sequence to nucleotide sequence.
- * The genetic code is degenerate; AASeqToNucSeq selects the
- * most frequent codon in E. coli if param `random` is 0, else
- * AASeqToNucSeq picks randomly among cognate codons.
+ *
+ * Reverse translate aa sequence to nucleotide sequence.  The genetic
+ * code is degenerate; AASeqToNucSeq selects the most frequent codon
+ * in E. coli if param `random` is 0 (false), else AASeqToNucSeq picks
+ * randomly among cognate codons.
  *
  * Note that AASeq should be an array of AminoAcid (i.e. ints). Use
  * LetterToAASeq to convert from single-letter sequences to int

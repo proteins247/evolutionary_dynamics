@@ -14,6 +14,10 @@
 // U C A G -> 0 1 2 3
 
 
+/* 
+ * Convert from enum Codon to enum AminoAcid.  
+ * Note, we return -2 if triplet is invalid.
+ */
 static AminoAcid TripletToAA(Codon triplet)
 {
     int out = -2;
@@ -115,16 +119,26 @@ static AminoAcid TripletToAA(Codon triplet)
     {
         fprintf(stderr,"genetic code error\n");
         fprintf(stderr,"triplet: %.3x\n",triplet);
+        exit(-1);
     }
 
-    return out;
+    return (AminoAcid)out;
 }
 
 
+/*
+ * Convert from enum AminoAcid to enum Codon
+ * if (random)
+ *   select randomly among corresponding codons
+ * else
+ *   select most common codon in E. coli for that amino acid
+ *
+ * returns -2 if aa is invalid
+ */
 static Codon AAtoCodon(AminoAcid aa, int random)
 {
     int end = -1;
-    int codons[6] = {end};      /* max six codons for aa */
+    int codons[7] = {end, end, end, end, end, end, end};      /* There are max six codons for aa */
     int num_codons = 0;
 
     switch (aa)
@@ -235,13 +249,17 @@ static Codon AAtoCodon(AminoAcid aa, int random)
         codons[1] = N_UAG;
         codons[2] = N_UGA;
         break; }
+    default: {
+        fprintf(stderr, "AAtoCodon error\n");
+        fprintf(stderr, "aa value: %d\n", aa);
+        exit(-1);    }
     }
 
     /* count number of codons for our aa */
-    do
+    while (codons[num_codons] != end)
     {
         num_codons++;
-    } while (codons[num_codons] != end);
+    }
 
     if (random)
     {
@@ -378,17 +396,18 @@ int AASeqToNucSeq(AminoAcid * AASeq, int * NucSeq, int AALen, int random)
 {
     Codon c;
     unsigned char n1, n2, n3;
-    int i;
+    int i, j;
 
-    for (i=0; i<AALen*3; i+=3)
+    for (i=0; i<AALen; i++)
     {
+        j = i * 3;
         c = AAtoCodon(AASeq[i], random);
         n1 = (c & 0x0f00) >> 8;
         n2 = (c & 0x00f0) >> 4;
         n3 = (c & 0x000f);
-        NucSeq[i] = n1;
-        NucSeq[i+1] = n2;
-        NucSeq[i+2] = n3;
+        NucSeq[j] = n1;
+        NucSeq[j+1] = n2;
+        NucSeq[j+2] = n3;
     }
 
     return 0;
