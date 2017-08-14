@@ -123,7 +123,10 @@ typedef enum Codon
  * Routines for manipulating nucleotide sequences
  */
 
-/* create a random sequence of int{0,1,2,3} of length Len */
+/* 
+ * Create a random sequence of int{0,1,2,3} of length Len 
+ * CreateRandomNucSequence2 avoids stop codons
+ */
 void CreateRandomNucSequence(int *NucSeq, int Len);
 void CreateRandomNucSequence2(int *NucSeq, int Len);
 
@@ -153,7 +156,7 @@ int CharNucSeqToAASeq(char *NucSeq, int N, AminoAcid *AASeq);
  *
  * return values:
  */
-int AASeqToNucSeq(AminoAcid * AASeq, int * NucSeq, int AALen, int random);
+void AASeqToNucSeq(AminoAcid * AASeq, int * NucSeq, int AALen, int random);
 
 /*
  * int PointMutateCharNucSequence(char *Seq, int Len);
@@ -167,18 +170,39 @@ int AASeqToNucSeq(AminoAcid * AASeq, int * NucSeq, int AALen, int random);
 int PointMutateNucSequence(int *NucSeq, int Len);
 int PointMutateCharNucSequence(char *NucSeq, int Len);
 
+/* Printing and data conversion routines: */
+/* input: int* or char* Seq {0,1,2,3}, output char *buf UCAG */
 void PrintAASequence(char *buf, AminoAcid *Seq, int Len);
 void PrintCharNucCodeSequence(char *buf, char *NucSeq, int Len);
 void PrintNucCodeSequence(char *buf, int *NucSeq, int Len);
-/*input: int* or char* Seq {0,1,2,3}, output char *buf UCAG */
 
-void LetterToNucCodeSeq(char *buf, int *NucSeq, int Len);
 /*input: char *buf UCAG, output int *Seq 0123 */
+void LetterToNucCodeSeq(char *buf, int *NucSeq, int Len);
 
+/* input: amino acid char *buf ACDEF..., output AminoAcid *Seq 0123 
+ * new function added -- VZ
+ */
 void LetterToAASeq(char *buf, AminoAcid *Seq, int Len);
-/*input: amino acid char *buf ACDEF..., output AminoAcid *Seq 0123 */
 
-void CopyIntToCharSeq(char *dest, int *src, int Len);
 /*copies Len values from src to dest*/
+void CopyIntToCharSeq(char *dest, int *src, int Len);
+
+
+/* 
+ * Additional functions to handle the relationship between codons and
+ * translation speed.
+ */
+
+/*
+ * ReadTranslationTimes opens file at filename and reads in
+ * translation times to an int array.
+ *
+ * times should hold at least 0x333 + 1 ints s.t. random access using
+ * enum Codon values is possible. Memory is cheap and 820 ints is only
+ * 6560 bytes
+ *
+ * The unit for these times depends on the user's application
+ */
+void ReadTranslationTimes(char * filename, unsigned int * times);
 
 #endif /* GENCODE_H_ */

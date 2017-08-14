@@ -16,7 +16,6 @@
 
 /* 
  * Convert from enum Codon to enum AminoAcid.  
- * Note, we return -2 if triplet is invalid.
  */
 static AminoAcid TripletToAA(Codon triplet)
 {
@@ -133,7 +132,6 @@ static AminoAcid TripletToAA(Codon triplet)
  * else
  *   select most common codon in E. coli for that amino acid
  *
- * returns -2 if aa is invalid
  */
 static Codon AAtoCodon(AminoAcid aa, int random)
 {
@@ -141,6 +139,7 @@ static Codon AAtoCodon(AminoAcid aa, int random)
     int codons[7] = {end, end, end, end, end, end, end};      /* There are max six codons for aa */
     int num_codons = 0;
 
+    /* codons[0] will be the most common codon */
     switch (aa)
     {
     case A_Cys: {
@@ -392,7 +391,7 @@ int CharNucSeqToAASeq(char *NucSeq, int N, AminoAcid *AASeq)
 }
 
 
-int AASeqToNucSeq(AminoAcid * AASeq, int * NucSeq, int AALen, int random)
+void AASeqToNucSeq(AminoAcid * AASeq, int * NucSeq, int AALen, int random)
 {
     Codon c;
     unsigned char n1, n2, n3;
@@ -401,7 +400,9 @@ int AASeqToNucSeq(AminoAcid * AASeq, int * NucSeq, int AALen, int random)
     for (i=0; i<AALen; i++)
     {
         j = i * 3;
+        /* enum AminoAcid -> enum Codon */
         c = AAtoCodon(AASeq[i], random);
+        /* Mask and bitshift to separate the three values */
         n1 = (c & 0x0f00) >> 8;
         n2 = (c & 0x00f0) >> 4;
         n3 = (c & 0x000f);
@@ -409,8 +410,6 @@ int AASeqToNucSeq(AminoAcid * AASeq, int * NucSeq, int AALen, int random)
         NucSeq[j+1] = n2;
         NucSeq[j+2] = n3;
     }
-
-    return 0;
 }
 
 
@@ -641,4 +640,35 @@ void CopyIntToCharSeq(char *dest, int *src, int Len)
     for (i=0; i<Len; i++)
         dest[i] = src[i];
     return;
+}
+
+
+void ReadTranslationTimes(char * filename, unsigned int * times)
+{
+    FILE *infile;
+    char reading_buffer[100];
+    int line_num = 0;
+    Codon c;
+    unsigned int time;
+
+    infile = fopen(filename, "r");
+    if (!infile)
+    {
+        fprintf(stderr,
+                "failed to open translation speed file: %s\n", filename);
+        exit(1);
+    }
+
+    /* fscanf, getline? */
+    while (fgets(reading_buffer, 100, infile) != NULL)
+    {
+        /* we ignore all lines that don't fit the format */
+        if (sscanf(reading_buffer, "%x %u", &c, &time) == 2)
+        {
+            times[c] = time;
+            line_num++;
+        }
+    }
+    /* there are no error checks, but ideally line_num == 61, for the
+       61 non-stop codons */
 }
