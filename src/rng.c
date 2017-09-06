@@ -10,6 +10,7 @@ static threefry4x64_ctr_t result = {{}};
 
 void set_threefry_array(unsigned long int user_key)
 {
+    /* This still allows for 2^64 possible seeds */
     key.v[0] = user_key;
     key.v[1] = user_key;
     key.v[2] = user_key;

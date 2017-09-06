@@ -391,6 +391,24 @@ int CharNucSeqToAASeq(char *NucSeq, int N, AminoAcid *AASeq)
 }
 
 
+void NucSeqToCodonSeq(int *NucSeq, int NucLen, Codon *CodonSeq)
+{
+    Codon t;
+    int i, j;
+    unsigned char n1, n2, n3;
+    for (i=0; i<NucLen; i+=3, j++)
+    {
+        n1 = NucSeq[i];
+        n2 = NucSeq[i+1];
+        n3 = NucSeq[i+2];
+
+        t = 0;
+        t = (n1 << 8 ) | (n2 << 4) | n3;
+
+        CodonSeq[j] = t;
+    }
+}
+
 void AASeqToNucSeq(AminoAcid * AASeq, int * NucSeq, int AALen, int random)
 {
     Codon c;
@@ -576,7 +594,7 @@ void PrintCharNucCodeSequence(char *buf, char *NucSeq, int Len)
     return;
 }
 
-void LetterToNucCodeSeq(char *buf, int *NucSeq, int Len)
+int LetterToNucCodeSeq(const char *buf, int *NucSeq, int Len)
 {
     int i;
     int c;
@@ -589,15 +607,16 @@ void LetterToNucCodeSeq(char *buf, int *NucSeq, int Len)
         case  'C': { c = 1; break; }
         case  'A': { c = 2; break; }
         case  'G': { c = 3; break; }
+        default: { return -1;}
         }
         NucSeq[i] = c;
 
     }
-    return;
+    return 0;
 }
 
 
-void LetterToAASeq(char *buf, AminoAcid *Seq, int Len)
+int LetterToAASeq(const char *buf, AminoAcid *Seq, int Len)
 {
     int i;
     AminoAcid a;
@@ -625,12 +644,11 @@ void LetterToAASeq(char *buf, AminoAcid *Seq, int Len)
         case 'R': { a = A_Arg; break; }
         case 'K': { a = A_Lys; break; }
         case 'P': { a = A_Pro; break; }
-        default: {
-            fprintf(stderr, "LetterToAASeq error: sequence char: %c", buf[i]);
-            exit(1); }
+        default: { return -1; }
         }
         Seq[i] = a;
     }
+    return 0;
 }
 
 
@@ -643,7 +661,7 @@ void CopyIntToCharSeq(char *dest, int *src, int Len)
 }
 
 
-void ReadTranslationTimes(char * filename, unsigned int * times)
+void ReadTranslationTimes(const char * filename, unsigned int * times)
 {
     FILE *infile;
     char reading_buffer[100];
