@@ -8,15 +8,6 @@ static unsigned char randomNumberIndex = 4;
 static threefry4x64_ctr_t result = {{}};
 
 
-void set_threefry_array(unsigned long int user_key)
-{
-    /* This still allows for 2^64 possible seeds */
-    key.v[0] = user_key;
-    key.v[1] = user_key;
-    key.v[2] = user_key;
-    key.v[3] = user_key;
-}
-
 void increment_counter()
 {
     static unsigned char index = 0;
@@ -24,6 +15,18 @@ void increment_counter()
         index = 0;
     }
     ctr.v[index++]++;
+}
+
+
+/* Functions implementations for rng.h */
+
+void set_threefry_array(unsigned long int user_key)
+{
+    /* This still allows for 2^64 possible seeds */
+    key.v[0] = user_key;
+    key.v[1] = user_key;
+    key.v[2] = user_key;
+    key.v[3] = user_key;
 }
 
 double threefryrand()

@@ -2,7 +2,7 @@
 #include "Random123/u01fixedpt.h"
 
 /* 
- * threefryrand() generates random doubles in the range [0.0, 1.0]
+ * threefryrand() generates random doubles in the range [0.0, 1.0)
  * using an algorithm from the Random123 library. threefryrand_int
  * returns a uint64.
  *
@@ -22,12 +22,13 @@
 #ifndef RNG_H_
 #define RNG_H_
 
+/* Sets RNG seed */
 void set_threefry_array(unsigned long int user_key);
 
-void increment_counter();
-
+/* Return double in range [0., 1.) */
 double threefryrand();
 
+/* Return random unsigned int */
 unsigned long int threefryrand_int();
 
 /* diagnostic */
