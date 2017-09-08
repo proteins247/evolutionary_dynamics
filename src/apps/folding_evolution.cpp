@@ -3,23 +3,33 @@
  */
 
 #include <iostream>
+#include <iomanip>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 #include <memory>
 #include <csignal> 		// eventually need to think about handling interrupts
+#include <cmath>
 #include <map>
 
 #include <getopt.h>
 #include <unistd.h>
-#include <math.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#define CPLUSPLUS __cplusplus
+#undef __cplusplus
+// When compiling Random123 header files for rng.h, we don't want c++
+// features (they're not compatible with extern "C"), so we
+// temporarily undefine __cplusplus, saving its value in CPLUSPLUS.
 extern "C" {
 #include "../gencode.h"
 #include "../rng.h"
 }
+#define __cplusplus CPLUSPLUS
+#undef CPLUSPLUS
+
 
 static const std::string helptext =
     "folding_evolution\n"
@@ -29,7 +39,7 @@ static const std::string helptext =
     "\n"
     "  -n, --native-fold=CONF    Required. The native conformation of the\n"
     "                            as a latPack-style move sequence.\n"
-    "  -s, --speed-params=FILE   Required. Path to file with tranlation\n"
+    "  -s, --speed-params=FILE   Required. Path to file with translation\n"
     "                            times of the codons.\n"
     "  -d, --tempfile-path=PATH  LatFoldVec trajectory files written to this\n"
     "                            directory. Default=./\n"
@@ -73,7 +83,7 @@ void print_help();
 
 // Convert a vector of strings into a vector of char pointers for use
 // by execv family of commands. Adds a NULL element to the end.
-std::vector<char * const> string_vec_to_cstring_vec(
+std::vector<char *> string_vec_to_cstring_vec(
     std::vector<std::string>& string_vec);
 
 
@@ -145,15 +155,21 @@ double evaluate_fitness(
     int n_simulations=1);
 
 
+// Print the header for state output
+// we would want
 void cout_header(
     std::ostream * outstream,
-    const std::string & aa_sequence,
-    const std::string & nuc_sequence,
-    double fitness);
+    const std::vector<AminoAcid> & aa_sequence,
+    const std::vector<int> & nuc_sequence);
+
 
 // Print out what happened each generation.
 void cout_state(
-    std::ostream * outstream);
+    std::ostream * outstream,
+    int generation,
+    std::vector<AminoAcid> & aa_sequence,
+    std::vector<int> & nuc_sequence,
+    double fitness);
 
 
 int main(int argc, char** argv)
@@ -368,9 +384,9 @@ int main(int argc, char** argv)
     unsigned int nuc_length = protein_length * 3;
 
     // After inferring length, reserve space
-    nuc_sequence.reserve(nuc_length);
-    aa_sequence.reserve(protein_length);
-    codon_sequence.reserve(protein_length);
+    nuc_sequence.resize(nuc_length);
+    aa_sequence.resize(protein_length);
+    codon_sequence.resize(protein_length);
 
     // We use reserve because we directly access the underlying arrays of
     // our three vectors in this next section
@@ -431,8 +447,7 @@ int main(int argc, char** argv)
     // This is hackish
     CodonIntMap translation_times;
     int idx = 0;
-    for (std::vector<unsigned int>::iterator it=translation_times_vec.begin();
-	 it!=translation_times_vec.end();
+    for (auto it=translation_times_vec.begin(); it!=translation_times_vec.end();
 	 ++it, ++idx)
     {
 	if (*it != 0)
@@ -442,12 +457,16 @@ int main(int argc, char** argv)
     // It's time to give the people some information
     *outstream
 	<< "# folding_evolution" << std::endl
-	<< "# simulation of " << std::endl
+	<< "# input seq" << sequence << std::endl
+	<< "# n_gens : " << n_gens << std::endl
+	<< "# pop size : " << population_size << std::endl
+	<< "# temperature : " << temperature << std::endl
+	<< "# sims per gen : " << n_simulations << std::endl
+	<< "# rng seed : " << rng_seed << std::endl
 	;
 
-     
-
-
+    cout_header(outstream, aa_sequence, nuc_sequence); 
+    
     // Simulation-related variables and parameters
     std::string translation_schedule;
     std::unique_ptr<char []> aa_sequence_str(new char[protein_length+1]);
@@ -455,7 +474,7 @@ int main(int argc, char** argv)
     double fitness;
     double selection;
     double fixation;
-    std::vector<int> old_nuc_sequence;
+    std::vector<int> old_nuc_sequence = nuc_sequence;
     std::vector<std::string> latfoldvec_command;
     std::vector<std::string> latmaptraj_command;
     std::string outfile_base;
@@ -505,14 +524,16 @@ int main(int argc, char** argv)
 	if (fixation > threefryrand())
 	{
 	    old_nuc_sequence = nuc_sequence;
-	    // std cout some stuff about accepted
 	}
 	else
 	{
 	    nuc_sequence = old_nuc_sequence;
 	}
 
-	// make new mutation
+	// Output information
+	cout_state(outstream, gen, aa_sequence, nuc_sequence, fitness);
+
+	// Make new mutation
 	while (PointMutateNucSequence(nuc_sequence.data(), nuc_length) < 0);
 
 	// and update sequences
@@ -534,10 +555,10 @@ void print_help()
 
 // Convert a vector of strings into a vector of char pointers for use
 // by execv family of commands. Adds a NULL element to the end.
-std::vector<char * const> string_vec_to_cstring_vec(
+std::vector<char *> string_vec_to_cstring_vec(
     std::vector<std::string>& string_vec)
 {
-    std::vector<char * const> cstrings;
+    std::vector<char *> cstrings;
     for (auto& string : string_vec)
     {
 	cstrings.push_back(&string.front());
@@ -581,7 +602,7 @@ std::vector<std::string> compose_latfoldvec_command(
     std::vector<std::string> command;
 
     command.push_back(latpack_path + "/bin/latFoldVec");
-    command.push_back("-energyFile=" + latpack_path + "/share/MJ.txt");
+    command.push_back("-energyFile=" + latpack_path + "/share/latpack/MJ.txt");
     command.push_back("-seq=" + aa_sequence);
     command.push_back("-final=" + folded_conformation);
     command.push_back("-elongationSchedule=" + translation_schedule);
@@ -627,7 +648,7 @@ void run_latfoldvec(
 		"-outFile=" + h5file_base + std::to_string(i) + ".h5");
 	    // latfoldvec_command.push_back("-title=?");
 
-	    std::vector<char * const> cstring_command_vec = string_vec_to_cstring_vec(
+	    std::vector<char *> cstring_command_vec = string_vec_to_cstring_vec(
 		latfoldvec_command);
 
 	    execv(cstring_command_vec[0], cstring_command_vec.data());
@@ -692,7 +713,7 @@ void run_latmaptraj(
 	    // Add additional parameters
 	    latmaptraj_command.push_back("-traj=" + h5file_base +
 					 std::to_string(i) + ".h5");
-	    std::vector<char * const> cstring_command_vec = string_vec_to_cstring_vec(
+	    std::vector<char *> cstring_command_vec = string_vec_to_cstring_vec(
 		latmaptraj_command);
 
 	    execv(cstring_command_vec[0], cstring_command_vec.data());
@@ -735,11 +756,56 @@ double evaluate_fitness(
 }
 
 
+// Print the header for state output
+void cout_header(
+    std::ostream * outstream,
+    const std::vector<AminoAcid> & aa_sequence,
+    const std::vector<int> & nuc_sequence)
+{
+    *outstream << std::endl;
+    *outstream << std::left <<
+	"# Gen " <<
+	std::setw(aa_sequence.size()) << "AA sequence" << " " <<
+	std::setw(nuc_sequence.size()) << "Nuc sequence" << " " <<
+	std::setw(5) << "Fit." <<
+	std::endl;
+
+    int line_length = 6;
+    line_length += aa_sequence.size() + 1;
+    line_length += nuc_sequence.size() + 1;
+    line_length += 5;
+
+    *outstream << "# " << std::string(line_length, '-')<< std::endl;
+
+    *outstream << std::fixed << std::setprecision(2);
+    
+    return;
+}
+
+
 // Print out what happened each generation.
 void cout_state(
-    std::ostream * outstream)
+    std::ostream * outstream,
+    int generation,
+    std::vector<AminoAcid> & aa_sequence,
+    std::vector<int> & nuc_sequence,
+    double fitness)
 {
+    auto aa_seq_len = aa_sequence.size();
+    auto nuc_seq_len = nuc_sequence.size();
+    std::unique_ptr<char []> aa_seq_str(new char[aa_seq_len+1]);
+    std::unique_ptr<char []> nuc_seq_str(new char[nuc_seq_len+1]);
+    PrintAASequence(aa_seq_str.get(), aa_sequence.data(), aa_seq_len);
+    PrintNucCodeSequence(nuc_seq_str.get(), nuc_sequence.data(), nuc_seq_len);
 
+    *outstream << std::right
+	       << std::setw(5) << generation
+	       << std::setw(aa_seq_len) << aa_seq_str.get() << " "
+	       << std::setw(nuc_seq_len) << nuc_seq_str.get() << " "
+	       << std::setw(5) << fitness
+	       << std::endl;
+
+    return;    
 }
 
 
