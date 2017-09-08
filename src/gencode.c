@@ -394,7 +394,7 @@ int CharNucSeqToAASeq(char *NucSeq, int N, AminoAcid *AASeq)
 void NucSeqToCodonSeq(int *NucSeq, int NucLen, Codon *CodonSeq)
 {
     Codon t;
-    int i, j;
+    int i, j=0;
     unsigned char n1, n2, n3;
     for (i=0; i<NucLen; i+=3, j++)
     {
