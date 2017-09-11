@@ -20,7 +20,7 @@ void increment_counter()
 
 /* Functions implementations for rng.h */
 
-void set_threefry_array(unsigned long int user_key)
+void set_threefry_array(uint64_t user_key)
 {
     /* This still allows for 2^64 possible seeds */
     key.v[0] = user_key;
@@ -40,7 +40,7 @@ double threefryrand()
     return u01fixedpt_closed_open_64_53(result.v[randomNumberIndex++]);
 }
 
-unsigned long int threefryrand_int()
+uint64_t threefryrand_int()
 {
    if (randomNumberIndex == 4)
    {

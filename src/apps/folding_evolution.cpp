@@ -15,7 +15,9 @@
 
 #include <getopt.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 
 #define CPLUSPLUS __cplusplus
@@ -68,7 +70,7 @@ static const int LATPACK_ERROR = 4;
 // default values
 static const std::string DEFAULT_LATPACK_PATH = "/n/home00/vzhao/pkg/latPack/1.9.1-6/";
 static const std::string DEFAULT_TEMPFILE_PATH = "./";
-static const size_t DEFAULT_SEED = 1;
+static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_N_SIMS = 1;
 static const int DEFAULT_LATFOLD_OUTFREQ = 100;
 static const int DEFAULT_POPULATION_SIZE = 100;
@@ -183,7 +185,7 @@ int main(int argc, char** argv)
     std::string tempfile_path = DEFAULT_TEMPFILE_PATH;
     std::ostream * outstream = &std::cout;
     std::ofstream outfile;
-    size_t rng_seed = DEFAULT_SEED;
+    uint64_t rng_seed = DEFAULT_SEED;
 
     // how many folding simulations run per generation
     // is controlled by this parameter
@@ -457,7 +459,7 @@ int main(int argc, char** argv)
     // It's time to give the people some information
     *outstream
 	<< "# folding_evolution" << std::endl
-	<< "# input seq" << sequence << std::endl
+	<< "# input seq : " << sequence << std::endl
 	<< "# n_gens : " << n_gens << std::endl
 	<< "# pop size : " << population_size << std::endl
 	<< "# temperature : " << temperature << std::endl
@@ -643,13 +645,17 @@ void run_latfoldvec(
 	    // we land here for each instance
 	    // Add additional parameters
 	    latfoldvec_command.push_back(
-		"-seed=" + std::to_string((unsigned int)threefryrand_int()));
+		"-seed=" + std::to_string(threefryrand_int() % INT32_MAX));
 	    latfoldvec_command.push_back(
 		"-outFile=" + h5file_base + std::to_string(i) + ".h5");
 	    // latfoldvec_command.push_back("-title=?");
 
 	    std::vector<char *> cstring_command_vec = string_vec_to_cstring_vec(
 		latfoldvec_command);
+
+	    // suppress std out
+	    int fd = open("/dev/null", O_WRONLY);
+	    dup2(fd, 1);
 
 	    execv(cstring_command_vec[0], cstring_command_vec.data());
 	}
@@ -716,6 +722,10 @@ void run_latmaptraj(
 	    std::vector<char *> cstring_command_vec = string_vec_to_cstring_vec(
 		latmaptraj_command);
 
+	    // suppress std out
+	    int fd = open("/dev/null", O_WRONLY);
+	    dup2(fd, 1);
+
 	    execv(cstring_command_vec[0], cstring_command_vec.data());
 	}
     }
@@ -762,11 +772,18 @@ void cout_header(
     const std::vector<AminoAcid> & aa_sequence,
     const std::vector<int> & nuc_sequence)
 {
+    auto shorten = [](std::string str, int len)
+    {
+	return str.substr(0, len);
+    };
+
     *outstream << std::endl;
     *outstream << std::left <<
-	"# Gen " <<
-	std::setw(aa_sequence.size()) << "AA sequence" << " " <<
-	std::setw(nuc_sequence.size()) << "Nuc sequence" << " " <<
+	"# Gen|" <<
+	std::setw(aa_sequence.size()) <<
+	shorten("AA sequence", aa_sequence.size()) << "|" <<
+	std::setw(nuc_sequence.size()) <<
+	shorten("Nuc sequence", nuc_sequence.size()) << "|" <<
 	std::setw(5) << "Fit." <<
 	std::endl;
 
@@ -799,7 +816,7 @@ void cout_state(
     PrintNucCodeSequence(nuc_seq_str.get(), nuc_sequence.data(), nuc_seq_len);
 
     *outstream << std::right
-	       << std::setw(5) << generation
+	       << std::setw(5) << generation << " "
 	       << std::setw(aa_seq_len) << aa_seq_str.get() << " "
 	       << std::setw(nuc_seq_len) << nuc_seq_str.get() << " "
 	       << std::setw(5) << fitness

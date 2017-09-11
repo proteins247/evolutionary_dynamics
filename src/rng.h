@@ -23,13 +23,13 @@
 #define RNG_H_
 
 /* Sets RNG seed */
-void set_threefry_array(unsigned long int user_key);
+void set_threefry_array(uint64_t user_key);
 
 /* Return double in range [0., 1.) */
 double threefryrand();
 
-/* Return random unsigned int */
-unsigned long int threefryrand_int();
+/* Return random unsigned integer of 64 bits */
+uint64_t threefryrand_int();
 
 /* diagnostic */
 void printf_counter();
