@@ -688,5 +688,7 @@ void ReadTranslationTimes(const char * filename, unsigned int * times)
         }
     }
     /* there are no error checks, but ideally line_num == 61, for the
-       61 non-stop codons */
+       61 non-stop codons. Or == 64, if times for stop codons are
+       included, perhaps representing the time for release.
+    */
 }

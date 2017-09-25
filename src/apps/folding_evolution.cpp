@@ -10,25 +10,32 @@
 #include <vector>
 #include <memory>
 #include <csignal> 		// eventually need to think about handling interrupts
+#include <cstring>
 #include <cmath>
 #include <map>
 
 #include <getopt.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <hdf5.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 
 #define CPLUSPLUS __cplusplus
 #undef __cplusplus
-// When compiling Random123 header files for rng.h, we don't want c++
-// features (they're not compatible with extern "C"), so we
-// temporarily undefine __cplusplus, saving its value in CPLUSPLUS.
-extern "C" {
+// When compiling Random123 header files for rng.h, we don't need the
+//   C++ features (and they're not compatible with extern "C"), so we
+//   temporarily undefine __cplusplus, saving its value in CPLUSPLUS.
+//   We could alternatively build rng.o from rng.c using g++, and then
+//   we wouldn't have to wrap rng.h in extern "C".
+
+extern "C"
+{
 #include "../gencode.h"
 #include "../rng.h"
 }
+
 #define __cplusplus CPLUSPLUS
 #undef CPLUSPLUS
 
@@ -47,6 +54,9 @@ static const std::string helptext =
     "                            directory. Default=./\n"
     "  -l, --latpack-path=PATH   Latpack binaries here. Default=\n"
     "                            /n/home00/vzhao/pkg/latPack/1.9.1-6/\n"
+    "  -m, --mutation-mode=M     One of 0, 1, or 2, indicating restriction to only\n"
+    "                            synonymous mutations, non-synonymous mutation, or\n"
+    "                            allow both kinds of mutations (default).\n"
     "  -N, --sims-per-gen=N      Run N instances of latFoldVec per\n"
     "                            generation. Need N processors available.\n"
     "  -o, --outfile=FILE        Output will be sent to this file instead of\n"
@@ -72,12 +82,12 @@ static const std::string DEFAULT_LATPACK_PATH = "/n/home00/vzhao/pkg/latPack/1.9
 static const std::string DEFAULT_TEMPFILE_PATH = "./";
 static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_N_SIMS = 1;
-static const int DEFAULT_LATFOLD_OUTFREQ = 100;
-static const int DEFAULT_POPULATION_SIZE = 100;
+static const int DEFAULT_LATFOLD_OUTFREQ = 1000;
+static const int DEFAULT_POPULATION_SIZE = 500;
 static const double DEFAULT_TEMPERATURE = 0.3;
 
 typedef std::map<Codon, int> CodonIntMap;
-
+static const std::vector<Codon> STOP_CODONS = {N_UAA, N_UAG, N_UGA};
 
 // Print this program's help message
 void print_help();
@@ -151,10 +161,16 @@ void run_latmaptraj(
 
 // Analyze latFoldVec simulations to determine a fitness value for
 // protein under evaluation.
+//
+// @param h5file_base The partial name of the file hdf5 output was
+//        written to
+// @param n_simulations The number of latFoldVec simulations run.
+// @param n_proteins The number of proteins
+// @param n_0 Fitness function parameter.
 double evaluate_fitness(
-    const std::string& folded_conformation,
     const std::string& h5file_base,
-    int n_simulations=1);
+    int n_simulations=1,
+    double f_0=0.5);
 
 
 // Print the header for state output
@@ -171,7 +187,8 @@ void cout_state(
     int generation,
     std::vector<AminoAcid> & aa_sequence,
     std::vector<int> & nuc_sequence,
-    double fitness);
+    double fitness,
+    bool accept);
 
 
 int main(int argc, char** argv)
@@ -199,6 +216,13 @@ int main(int argc, char** argv)
     int random_codons = 0;
     int population_size = DEFAULT_POPULATION_SIZE;
     double temperature = DEFAULT_TEMPERATURE;
+    enum MutationMode
+    {
+	SynonymousOnly,
+	NonsynonymousOnly,
+	MutateAll
+    } mutation_mode = MutateAll;
+
     // End variables to be determined by commandline options: 
 
     // Begin option handling (https://linux.die.net/man/3/getopt)
@@ -217,6 +241,7 @@ int main(int argc, char** argv)
     static struct option long_options[] = {
 	{"tempfile-path", required_argument, NULL, 'd'},
 	{"latpack-path", required_argument, NULL, 'l'},
+	{"mutation-mode", required_argument, NULL, 'm'},
 	{"native-fold", required_argument, NULL, 'n'},
 	{"sims-per-gen", required_argument, NULL, 'N'},
 	{"random-codons", no_argument, &random_codons, 1},
@@ -229,7 +254,7 @@ int main(int argc, char** argv)
 	{NULL, 0, NULL, 0}
     };
 
-    while ((c = getopt_long(argc, argv, "d:l:n:N:o:p:r:s:t:h",
+    while ((c = getopt_long(argc, argv, "d:l:m:n:N:o:p:r:s:t:h",
 			    long_options, &option_index))
 	   != -1)
     {
@@ -245,6 +270,31 @@ int main(int argc, char** argv)
 	    break;
 	case 'l':
 	    latpack_path = optarg;
+	    break;
+	case 'm':
+	    try
+	    {
+		switch (std::stoi(optarg))
+		{
+		case 0:
+		    mutation_mode = SynonymousOnly;
+		    break;
+		case 1:
+		    mutation_mode = NonsynonymousOnly;
+		    break;
+		case 2:
+		    mutation_mode = MutateAll;
+		    break;
+		default:
+		    throw std::invalid_argument("Mutation mode not one of 0, 1, 2");
+		}
+	    }
+	    catch (...)
+	    {
+		std::cerr << "--mutation-mode argument not one of 0, 1, 2: "
+			  << optarg << std::endl;
+		exit(PARSE_ERROR);
+	    }
 	    break;
 	case 'n':
 	    folded_conformation = optarg;
@@ -271,7 +321,7 @@ int main(int argc, char** argv)
 	    }
 	    catch (...)
 	    {
-		std::cerr << "Failed to convert ppoulation size: " << optarg
+		std::cerr << "Failed to convert --population-size: " << optarg
 			  << std::endl;
 		exit(PARSE_ERROR);
 	    }
@@ -354,6 +404,7 @@ int main(int argc, char** argv)
     }
     
     // End option parsing
+    // Begin simulation setup
 
     // initialize RNG
     set_threefry_array(rng_seed);
@@ -375,7 +426,6 @@ int main(int argc, char** argv)
 	outstream = &outfile;
     }
     
-    // Begin simulation setup
     // Process the user-provided sequence
     std::vector<int> nuc_sequence;
     std::vector<AminoAcid> aa_sequence;
@@ -448,12 +498,20 @@ int main(int argc, char** argv)
 
     // This is hackish
     CodonIntMap translation_times;
+    std::vector<int> stop_codon_times;
     int idx = 0;
     for (auto it=translation_times_vec.begin(); it!=translation_times_vec.end();
 	 ++it, ++idx)
     {
 	if (*it != 0)
 	    translation_times.insert(std::pair<Codon, int>((Codon)idx, *it));
+    }
+
+    // Here, we find the three translation times that correspond to
+    // the stop codons.
+    for (auto it=STOP_CODONS.begin(); it!=STOP_CODONS.end(); ++it)
+    {
+	stop_codon_times.push_back(translation_times.at(*it));
     }
 
     // It's time to give the people some information
@@ -465,6 +523,7 @@ int main(int argc, char** argv)
 	<< "# temperature : " << temperature << std::endl
 	<< "# sims per gen : " << n_simulations << std::endl
 	<< "# rng seed : " << rng_seed << std::endl
+	<< "# translation params : " << speedparams_path << std::endl
 	;
 
     cout_header(outstream, aa_sequence, nuc_sequence); 
@@ -477,18 +536,22 @@ int main(int argc, char** argv)
     double selection;
     double fixation;
     std::vector<int> old_nuc_sequence = nuc_sequence;
+    std::vector<int> temp_sequence;
     std::vector<std::string> latfoldvec_command;
     std::vector<std::string> latmaptraj_command;
     std::string outfile_base;
-    std::string latpack_outfile_signature = std::to_string(
-	threefryrand_int() % 1000);
+    std::string output_dir;
+    // std::string latpack_outfile_signature = std::to_string(
+    // 	threefryrand_int() % 1000);
+    bool accept;
 
     // Begin running simulation
     for (int gen=0; gen<n_gens; gen++)
     {
 	// Compose the simulation parameters
+	// For now, the final time is taken to be for stop codon UAA
 	translation_schedule = make_translation_schedule(
-	    translation_times, codon_sequence);
+	    translation_times, codon_sequence, stop_codon_times[0]);
 
 	PrintAASequence(aa_sequence_str.get(), aa_sequence.data(), protein_length);
 
@@ -500,43 +563,62 @@ int main(int argc, char** argv)
 	    temperature,
 	    latfold_output_frequency);
 
+	output_dir = tempfile_path + "/fold_evo_sim__gen"
+	    + std::to_string(gen);
+	if (mkdir(output_dir.c_str(), 0754) == -1)
+	{
+	    std::cerr << "Error making dir: " << output_dir << std::endl;
+	    exit(IO_ERROR);
+	}
 	outfile_base = tempfile_path + "/fold_evo_sim__gen"
-	    + std::to_string(gen) + "_"
-	    + latpack_outfile_signature + "_sim";
+	    + std::to_string(gen) + "/" + "sim";
 
-	// run simulation(s)
+	// Run simulation(s)
 	run_latfoldvec(latfoldvec_command, outfile_base, n_simulations);
 
-	// run analysis
-	latmaptraj_command = compose_latmaptraj_command(
-	    latpack_path, folded_conformation);
+	// Run analysis (currently not used)
+	// latmaptraj_command = compose_latmaptraj_command(
+	//     latpack_path, folded_conformation);
 
-	run_latmaptraj(latmaptraj_command, outfile_base, n_simulations);
+	// run_latmaptraj(latmaptraj_command, outfile_base, n_simulations);
 
-	// evaluate fitness
-	fitness = evaluate_fitness(
-	    folded_conformation,
-	    outfile_base,
-	    n_simulations);
+	// Evaluate fitness
+	fitness = evaluate_fitness(outfile_base, n_simulations);
 	selection = (fitness - old_fitness) / old_fitness;
 	fixation = (1 - exp(-2 * selection)) /
 	    (1 - exp(-2 * population_size * selection));
 
-	// decide whether to accept
+	// Decide whether to accept
 	if (fixation > threefryrand())
+	    accept = true;
+	else
+	    accept = false;
+
+	// Output information
+	cout_state(outstream, gen, aa_sequence, nuc_sequence, fitness, accept);
+
+	// Update / revert
+	if (accept)
 	{
 	    old_nuc_sequence = nuc_sequence;
+	    old_fitness = fitness;
 	}
 	else
 	{
 	    nuc_sequence = old_nuc_sequence;
 	}
 
-	// Output information
-	cout_state(outstream, gen, aa_sequence, nuc_sequence, fitness);
-
 	// Make new mutation
-	while (PointMutateNucSequence(nuc_sequence.data(), nuc_length) < 0);
+	do
+	{
+	    temp_sequence = nuc_sequence;
+	    int m = PointMutateNucSequence(nuc_sequence.data(), nuc_length);
+	    if (m == mutation_mode)
+		break;
+	    if (mutation_mode == MutateAll && m >= 0)
+		break;
+	    nuc_sequence = temp_sequence;
+	} while (true);
 
 	// and update sequences
 	NucSeqToCodonSeq(nuc_sequence.data(), nuc_length, codon_sequence.data());
@@ -633,6 +715,8 @@ void run_latfoldvec(
 {
     for (int i=0; i<n_simulations; ++i)
     {
+	// increment the RNG by calling it
+	threefryrand_int();
 	pid_t pid = fork();
 	if (pid == -1)
 	{
@@ -755,14 +839,46 @@ void run_latmaptraj(
 // Analyze latFoldVec simulations to determine a fitness value for
 // protein under evaluation.
 double evaluate_fitness(
-    const std::string& folded_conformation,
     const std::string& h5file_base,
-    int n_simulations)
+    int n_simulations,
+    double f_0)
 {
-    // Now for each hdf5 file, we need to read in the data
+    auto fitness_func = [&](double frac_folded)
+    {
+	return 0.001 + frac_folded / (frac_folded + f_0);
+    };
 
-    // temporary placeholder, just return a random number lol
-    return threefryrand();
+    int n_folded = 0;
+
+    // Now for each hdf5 file, we need to read in the data
+    for (int i=0; i<n_simulations; ++i)
+    {
+	std::string filename = h5file_base + std::to_string(i) + ".h5";
+	hid_t file_id = H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+	hid_t group_id = H5Gopen2(file_id, "traj1", H5P_DEFAULT);
+	hid_t attribute_id = H5Aopen(group_id, "Found final struct",  H5P_DEFAULT);
+
+	hid_t strtype = H5Tcopy(H5T_C_S1);
+	H5Tset_size(strtype, 4);
+
+	char found_final[4];
+
+	H5Aread(attribute_id, strtype, found_final);
+
+	if (std::strncmp(found_final, "yes", 3) == 0)
+	{
+	    n_folded++;
+	}
+	
+	H5Tclose(strtype);
+	H5Aclose(attribute_id);
+	H5Gclose(group_id);
+	H5Fclose(file_id);
+    }
+
+    double frac_folded = n_folded / (double)n_simulations;
+    
+    return fitness_func(frac_folded);
 }
 
 
@@ -772,25 +888,25 @@ void cout_header(
     const std::vector<AminoAcid> & aa_sequence,
     const std::vector<int> & nuc_sequence)
 {
-    auto shorten = [](std::string str, int len)
+    auto shorten = [outstream](std::string str, int len)
     {
+	*outstream << std::setw(len);
 	return str.substr(0, len);
     };
 
     *outstream << std::endl;
-    *outstream << std::left <<
-	"# Gen|" <<
-	std::setw(aa_sequence.size()) <<
-	shorten("AA sequence", aa_sequence.size()) << "|" <<
-	std::setw(nuc_sequence.size()) <<
-	shorten("Nuc sequence", nuc_sequence.size()) << "|" <<
-	std::setw(5) << "Fit." <<
-	std::endl;
+    *outstream << std::left <<	"# Gen|";
+    *outstream << shorten("AA sequence", aa_sequence.size()) << "|";
+    *outstream << shorten("Nuc sequence", nuc_sequence.size()) << "|";
+    *outstream << 
+	std::setw(5) << "Fit." << "|" <<
+	std::setw(6) << "Accept" << std::endl;
 
-    int line_length = 6;
+    int line_length = 4;
     line_length += aa_sequence.size() + 1;
     line_length += nuc_sequence.size() + 1;
-    line_length += 5;
+    line_length += 5 + 1;
+    line_length += 6;
 
     *outstream << "# " << std::string(line_length, '-')<< std::endl;
 
@@ -806,7 +922,8 @@ void cout_state(
     int generation,
     std::vector<AminoAcid> & aa_sequence,
     std::vector<int> & nuc_sequence,
-    double fitness)
+    double fitness,
+    bool accept)
 {
     auto aa_seq_len = aa_sequence.size();
     auto nuc_seq_len = nuc_sequence.size();
@@ -820,6 +937,7 @@ void cout_state(
 	       << std::setw(aa_seq_len) << aa_seq_str.get() << " "
 	       << std::setw(nuc_seq_len) << nuc_seq_str.get() << " "
 	       << std::setw(5) << fitness
+	       << std::setw(6) << ((accept) ? "yes" : "no")
 	       << std::endl;
 
     return;    
