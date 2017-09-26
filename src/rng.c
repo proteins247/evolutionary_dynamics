@@ -20,13 +20,13 @@ void increment_counter()
 
 /* Functions implementations for rng.h */
 
-void set_threefry_array(uint64_t user_key)
+void set_threefry_array(uint64_t uk0, uint64_t uk1,
+                        uint64_t uk2, uint64_t uk3)
 {
-    /* This still allows for 2^64 possible seeds */
-    key.v[0] = user_key;
-    key.v[1] = user_key;
-    key.v[2] = user_key;
-    key.v[3] = user_key;
+    key.v[0] = uk0;
+    key.v[1] = uk1;
+    key.v[2] = uk2;
+    key.v[3] = uk3;
 }
 
 double threefryrand()

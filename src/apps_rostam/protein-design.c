@@ -277,7 +277,7 @@ int main(int argc, char *argv[]){
 
 	printf("Finding stabilizing mutations...\n");
 	init_KISS();	//initialize random number generator
-	set_threefry_array(12345); /* victor: initialize threefry rng */
+	set_threefry_array(12345, 12345, 12345, 12345); /* victor: initialize threefry rng */
 	
 
 	for(ii=1; ii<pow(10, sim_time); ii++){

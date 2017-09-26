@@ -23,7 +23,8 @@
 #define RNG_H_
 
 /* Sets RNG seed */
-void set_threefry_array(uint64_t user_key);
+void set_threefry_array(uint64_t uk0, uint64_t uk1,
+                        uint64_t uk2, uint64_t uk3);
 
 /* Return double in range [0., 1.) */
 double threefryrand();
