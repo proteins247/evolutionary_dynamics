@@ -46,7 +46,7 @@ static const std::string helptext =
     "folding_evolution\n"
     "Usage: mpirun -np N folding_evolution [OPTIONS] SEQUENCE N_GENS \\\n"
     "         --native-fold NFOLD --speed-params FILE\n"
-    "Carry out folding evolutionary simulations. This is a parallel program\n"
+    "\nCarry out folding evolutionary simulations. This is a parallel program\n"
     "that carries out as many folding simulations each generation as there\n"
     "are available processors.\n"
     "\n"
@@ -66,7 +66,8 @@ static const std::string helptext =
     "  -p, --population-size=N   Size of population for evolutionary\n"
     "                            dynamics. Default=500\n"
     "      --random-codons       If SEQUENCE is of amino acids, corresponding\n"
-    "                            RNA sequence codons will be randomly picked.\n"
+    "                            RNA sequence codons will be randomly chosen.\n"
+    "                            (Default behavior is using fastest codons.)\n"
     "  -r, --seed=N              RNG seed. Default=1\n"
     "  -t, --temperature=T       Temperature of latFoldVec simulations.\n"
     "                            Default=0.3\n"
@@ -85,6 +86,7 @@ static const std::string DEFAULT_TEMPFILE_PATH = "./";
 static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_LATFOLD_OUTFREQ = 1000;
 static const int DEFAULT_POPULATION_SIZE = 500;
+static const int DEFAULT_MUTATION_MODE = 2;    // MutateAll default value
 static const double DEFAULT_TEMPERATURE = 0.3;
 
 typedef std::map<Codon, int> CodonIntMap;
@@ -223,13 +225,13 @@ int main(int argc, char** argv)
     int n_gens;			// How many generations to run
     int random_codons = 0;
     int population_size = DEFAULT_POPULATION_SIZE;
-    double temperature = DEFAULT_TEMPERATURE;
     enum MutationMode
     {
 	SynonymousOnly,
 	NonsynonymousOnly,
 	MutateAll
-    } mutation_mode = MutateAll; // MutateAll default value
+    } mutation_mode = static_cast<MutationMode>(DEFAULT_MUTATION_MODE);
+    double temperature = DEFAULT_TEMPERATURE;
 
     // End variables to be determined by commandline options: 
 
@@ -444,10 +446,11 @@ int main(int argc, char** argv)
 	    std::cerr << "Sequence: " << sequence << std::endl;
 	    exit(DATA_ERROR);
 	}
-	// The random_codons feature is currently disabled (0).
-	AASeqToNucSeq(aa_sequence.data(), nuc_sequence.data(), protein_length,
-	    0);
-	
+	if (!g_rank)
+	    AASeqToNucSeq(aa_sequence.data(), nuc_sequence.data(),
+			  protein_length, random_codons);
+	MPI_Bcast(nuc_sequence.data(), nuc_sequence.size(), MPI_INT,
+		  0, MPI_COMM_WORLD);
     }
     else if (protein_length * 3 == sequence.length())
     {
@@ -534,11 +537,8 @@ int main(int argc, char** argv)
     std::vector<int> temp_sequence;
     std::vector<std::string> latfoldvec_command;
     std::vector<std::string> latmaptraj_command;
-    std::string outfile_base;
     std::string output_dir;
-    // std::string latpack_outfile_signature = std::to_string(
-    // 	threefryrand_int() % 1000);
-    double random_num;
+    std::string outfile_base;
     int accept;
 
     // Begin running simulation
@@ -595,9 +595,8 @@ int main(int argc, char** argv)
 	// Decide whether to accept
 	if (!g_rank)
 	{
-	    // Root node generate the random number
-	    random_num = threefryrand();
-	    if (fixation > random_num)
+	    // Root node decide accept / reject
+	    if (fixation > threefryrand())
 		accept = true;
 	    else
 		accept = false;
