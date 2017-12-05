@@ -12,8 +12,8 @@
 #include <math.h>
 
 #include "cell.h"
-#include "../LP/gencode.h"
-#include "../PPI/bindinglib.h"
+#include "../gencode.h"
+#include "../bindinglib.h"
 
 int info;
 int aaseq[AASEQLEN], aaseq2[AASEQLEN], aaseq3[AASEQLEN];

@@ -21,7 +21,7 @@
 #include "../latticelib.h"
 #include "../bindinglib.h"
 #include "../rng.h"
-#include "../rng/generator.h"
+#include "../KISS_rng/generator.h"
 
 #define GENES 		2
 

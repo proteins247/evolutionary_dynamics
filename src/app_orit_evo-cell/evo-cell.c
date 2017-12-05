@@ -18,9 +18,9 @@
 
 #include "zlib.h"
 #include "define.h"
-#include "../LP/gencode.h"
-#include "../LP/latticelib.h"
-#include "../PPI/bindinglib.h"
+#include "../gencode.h"
+#include "../latticelib.h"
+#include "../bindinglib.h"
 #include "cell.h"
 #include "compare.h"
 
