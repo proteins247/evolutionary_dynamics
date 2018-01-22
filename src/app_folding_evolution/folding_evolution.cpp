@@ -1,5 +1,7 @@
 /* 
  * folding_evolution
+ *
+ * Monoclonal simulation
  */
 
 #include <iostream>
@@ -29,7 +31,7 @@
 // When compiling Random123 header files for rng.h, we don't need the
 //   C++ features (and they're not compatible with extern "C"), so we
 //   temporarily undefine __cplusplus, saving its value in CPLUSPLUS.
-//   We could alternatively build rng.o from rng.c using g++, and then
+//   Alternatively, we could build rng.o from rng.c using g++, and then
 //   we wouldn't have to wrap rng.h in extern "C".
 
 extern "C"
@@ -46,18 +48,24 @@ static const std::string helptext =
     "folding_evolution\n"
     "Usage: mpirun -np N folding_evolution [OPTIONS] SEQUENCE N_GENS \\\n"
     "         --native-fold NFOLD --speed-params FILE\n"
-    "\nCarry out folding evolutionary simulations. This is a parallel program\n"
+    "\n"
+    "Carry out folding evolutionary simulations. This is a parallel program\n"
     "that carries out as many folding simulations each generation as there\n"
     "are available processors.\n"
+    "\n"
+    "Folding simulations are used to evaluate the fitness of a a genetic\n"
+    "sequence. Because such a fitness measurement is noisy, sequences may\n"
+    "show fitnesses higher or lower than the actual values. Hence with each\n"
+    "generation, the previous sequence is also reevaluated.\n"
     "\n"
     "  -n, --native-fold=CONF    Required. The native conformation of the\n"
     "                            as a latPack-style move sequence.\n"
     "  -s, --speed-params=FILE   Required. Path to file with translation\n"
     "                            times of the codons.\n"
-    "  -d, --tempfile-path=PATH  LatFoldVec trajectory files written to this\n"
-    "                            directory. Default=./\n"
+    "  -d, --h5file-path=PATH    LatFoldVec trajectory files written to this\n"
+    "                            directory. Directory must exist. Default=./\n"
     "  -l, --latpack-path=PATH   Latpack binaries here. Default=\n"
-    "                            /n/home00/vzhao/pkg/latPack/1.9.1-6/\n"
+    "                            /n/home00/vzhao/pkg/latPack/1.9.1-7/\n"
     "  -m, --mutation-mode=M     One of 0, 1, or 2, indicating restriction to\n"
     "                            synonymous mutation, nonsynonymous mutation,\n"
     "                            or allow both kinds of mutations (default).\n"
@@ -72,6 +80,16 @@ static const std::string helptext =
     "  -t, --temperature=T       Temperature of latFoldVec simulations.\n"
     "                            Default=0.3\n"
     "      --help   Display this help and exit.\n"
+    "\n"
+    "Format of the output files:\n"
+    "\nThe primary output is a simulation log that records the generation\n"
+    "number, protein sequence, nucleic acid sequence, fitness, and whether\n"
+    "the mutation was accepted.\n"
+    "\n"
+    "In addition, it's recommended that --h5file-path be set so that\n"
+    "trajectory files go into a single directory. (The default behavior will\n"
+    "put files into the user's current directory.)\n"
+    "\n"
     ;
 
 // error values
@@ -81,21 +99,22 @@ static const int IO_ERROR = 3;
 static const int LATPACK_ERROR = 4;
 
 // default values
-static const std::string DEFAULT_LATPACK_PATH = "/n/home00/vzhao/pkg/latPack/1.9.1-6/";
-static const std::string DEFAULT_TEMPFILE_PATH = "./";
+static const std::string DEFAULT_LATPACK_PATH = "/n/home00/vzhao/pkg/latPack/1.9.1-7/";
+static const std::string DEFAULT_H5FILE_PATH = "./";
 static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_LATFOLD_OUTFREQ = 1000;
 static const int DEFAULT_POPULATION_SIZE = 500;
 static const int DEFAULT_MUTATION_MODE = 2;    // MutateAll default value
 static const double DEFAULT_TEMPERATURE = 0.3;
+static const double DEFAULT_REEVALUATION_RATIO = 0.5;
 
-typedef std::map<Codon, int> CodonIntMap;
 static const std::vector<Codon> STOP_CODONS = {N_UAA, N_UAG, N_UGA};
 
 // For now these variables for MPI will be global
 // until a better revision of the code
-int g_rank, g_size;
+int g_world_rank, g_subcomm_rank, g_world_size, g_subcomm_size;
 MPI_Status g_status;
+MPI_Comm g_subcomm;
 
 
 // --------------------------------------------------
@@ -127,7 +146,7 @@ std::vector<char *> string_vec_to_cstring_vec(
 //   to the given codon sequence to be used for the
 //   -elongationSchedule argument in latFoldVec.
 std::string make_translation_schedule(
-    const CodonIntMap & times,
+    const std::vector<unsigned int> & times,
     const std::vector<Codon> & codon_sequence,
     const int & final_time=0);
 
@@ -162,7 +181,7 @@ std::vector<std::string> compose_latmaptraj_command(
     const std::string& folded_conformation);
 
 
-// FIXME
+// FIXME (this function is not currently used)
 // Use fork and exec to run n_simulations of latMapTraj to analyze the
 // latFoldVec simulations that were run.
 void run_latmaptraj(
@@ -171,15 +190,41 @@ void run_latmaptraj(
     int n_simulations=1);
 
 
-// Analyze latFoldVec simulations to determine a fitness value for
-// protein under evaluation.
+// Analyze latFoldVec simulations to count number of successful
+// simulations. This is a parallel function.
 //
 // @param h5file_base The partial name of the file hdf5 output was
-//        written to
+//        written to.
 // @param n_0 Fitness function parameter.
-double evaluate_fitness(
-    const std::string& h5file_base,
+double evaluate_folded_fraction(
+    const std::string& filename);
+
+
+// Calculate fitness from folded fraction.
+//
+// @param folded_fraction The fraction of successful folding
+//        simulations
+// @param f_0 Fitness function parameter
+double calculate_fitness(
+    double folded_fraction,
     double f_0=0.5);
+
+
+// Update fitness to incorporate new fitness evaluations.
+//
+// @param old_fitness The previously estimated fitness value.
+// @param new_fitness The newly estimated fitness value.
+// @param n_reevaluators The number of simulations run to estimate
+//        the nw fitness value.
+// @param n_total The total number of CPUs running simulations.
+// @param n_gens_without_mutation Number of generations since last
+//        accepted mutation.
+double reaverage_folded_fraction(
+    double old_folded_fraction,
+    double new_folded_fraction,
+    int n_reevaluators,
+    int n_total,
+    int n_gens_without_mutation);
 
 
 // Print the header for state output
@@ -191,12 +236,14 @@ void cout_header(
 
 
 // Print out what happened each generation.
+// todo is to handle sequence reevaluation
 void cout_state(
     std::ostream * outstream,
     int generation,
     std::vector<AminoAcid> & aa_sequence,
     std::vector<int> & nuc_sequence,
-    double fitness,
+    double old_fitness,
+    double new_fitness,
     bool accept);
 
 
@@ -204,27 +251,31 @@ int main(int argc, char** argv)
 {
     // MPI init stuff
     MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &g_rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &g_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &g_world_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &g_world_size);
+    assert (g_world_size > 1);    // We need at least two CPUs
+
+    // Split cpus into two groups
+    // world_rank [0, reevaluation_size) does reevaluation
+    int reevaluation_size = (int)g_world_size * DEFAULT_REEVALUATION_RATIO;
+    bool proc_does_reevaluation = (g_world_rank < reevaluation_size) ?
+	true : false;
+    MPI_Comm_split(
+	MPI_COMM_WORLD, proc_does_reevaluation, g_world_rank, &g_subcomm);
+    MPI_Comm_rank(g_subcomm, &g_subcomm_rank);
+    MPI_Comm_size(g_subcomm, &g_subcomm_size);
 
     // Variables to be determined by commandline options: 
     std::string sequence;
+    int n_gens;			// How many generations to run
     std::string folded_conformation;
     std::string speedparams_path;
     std::string outfile_path;
     std::string latpack_path = DEFAULT_LATPACK_PATH;
-    std::string tempfile_path = DEFAULT_TEMPFILE_PATH;
+    std::string h5file_path = DEFAULT_H5FILE_PATH;
     std::ostream * outstream = &std::cout;
     std::ofstream outfile;
     uint64_t rng_seed = DEFAULT_SEED;
-
-    // This particular param currently cannot be changed by
-    // commandline arguments
-    int latfold_output_frequency = DEFAULT_LATFOLD_OUTFREQ;
-
-    int n_gens;			// How many generations to run
-    int random_codons = 0;
-    int population_size = DEFAULT_POPULATION_SIZE;
     enum MutationMode
     {
 	SynonymousOnly,
@@ -233,6 +284,11 @@ int main(int argc, char** argv)
     } mutation_mode = static_cast<MutationMode>(DEFAULT_MUTATION_MODE);
     double temperature = DEFAULT_TEMPERATURE;
 
+    // These particular params currently cannot be changed by
+    // commandline arguments
+    int latfold_output_frequency = DEFAULT_LATFOLD_OUTFREQ;
+    int random_codons = 0;
+    int population_size = DEFAULT_POPULATION_SIZE;
     // End variables to be determined by commandline options: 
 
     // Begin option handling (https://linux.die.net/man/3/getopt)
@@ -249,7 +305,7 @@ int main(int argc, char** argv)
      * NULL and 0 otherwise.
      */
     static struct option long_options[] = {
-	{"tempfile-path", required_argument, NULL, 'd'},
+	{"h5file-path", required_argument, NULL, 'd'},
 	{"latpack-path", required_argument, NULL, 'l'},
 	{"mutation-mode", required_argument, NULL, 'm'},
 	{"native-fold", required_argument, NULL, 'n'},
@@ -275,7 +331,7 @@ int main(int argc, char** argv)
 	case 0:
 	    break;
 	case 'd':
-	    tempfile_path = optarg;
+	    h5file_path = optarg;
 	    break;
 	case 'l':
 	    latpack_path = optarg;
@@ -405,10 +461,10 @@ int main(int argc, char** argv)
     // Begin simulation setup
 
     // Initialize RNG, giving different processes different seeds
-    set_threefry_array(rng_seed, g_rank, 0, 0);
+    set_threefry_array(rng_seed, g_world_rank, proc_does_reevaluation, 0);
 
     // Setup output
-    if (!outfile_path.empty())
+    if (!g_world_rank && !outfile_path.empty())
     {
 	outfile.open(outfile_path);
 	if (!outfile)
@@ -422,6 +478,7 @@ int main(int argc, char** argv)
     
     // Process the user-provided sequence
     std::vector<int> nuc_sequence;
+    std::vector<int> prev_nuc_sequence;
     std::vector<AminoAcid> aa_sequence;
     std::vector<Codon> codon_sequence;
 
@@ -429,12 +486,13 @@ int main(int argc, char** argv)
     unsigned int protein_length = folded_conformation.length() + 1;
     unsigned int nuc_length = protein_length * 3;
 
-    // After inferring length, reserve space
+    // After inferring length, resize vectors
     nuc_sequence.resize(nuc_length);
+    prev_nuc_sequence.resize(nuc_length);
     aa_sequence.resize(protein_length);
     codon_sequence.resize(protein_length);
 
-    // We use reserve because we directly access the underlying arrays of
+    // We use resize because we directly access the underlying arrays of
     // our three vectors in this next section
     if (protein_length == sequence.length()) 
     {
@@ -446,11 +504,8 @@ int main(int argc, char** argv)
 	    std::cerr << "Sequence: " << sequence << std::endl;
 	    exit(DATA_ERROR);
 	}
-	if (!g_rank)
-	    AASeqToNucSeq(aa_sequence.data(), nuc_sequence.data(),
-			  protein_length, random_codons);
-	MPI_Bcast(nuc_sequence.data(), nuc_sequence.size(), MPI_INT,
-		  0, MPI_COMM_WORLD);
+	AASeqToNucSeq(aa_sequence.data(), nuc_sequence.data(),
+		      protein_length, random_codons);
     }
     else if (protein_length * 3 == sequence.length())
     {
@@ -489,19 +544,9 @@ int main(int argc, char** argv)
 
     // Open translation speed data file and read
     // Make vector of 821, since highest codon is 0x333 = 820
-    std::vector<unsigned int> translation_times_vec(821, 0);
-    ReadTranslationTimes(speedparams_path.c_str(), translation_times_vec.data());
-
-    // This is hackish
-    CodonIntMap translation_times;
+    std::vector<unsigned int> translation_times(821, 0);
     std::vector<int> stop_codon_times;
-    int idx = 0;
-    for (auto it=translation_times_vec.begin(); it!=translation_times_vec.end();
-	 ++it, ++idx)
-    {
-	if (*it != 0)
-	    translation_times.insert(std::pair<Codon, int>((Codon)idx, *it));
-    }
+    ReadTranslationTimes(speedparams_path.c_str(), translation_times.data());
 
     // Here, we find the three translation times that correspond to
     // the stop codons.
@@ -511,7 +556,7 @@ int main(int argc, char** argv)
     }
 
     // It's time to give the people some information
-    if (!g_rank)
+    if (!g_world_rank)
     {
 	*outstream
 	    << "# folding_evolution" << std::endl
@@ -519,7 +564,8 @@ int main(int argc, char** argv)
 	    << "# n_gens : " << n_gens << std::endl
 	    << "# pop size : " << population_size << std::endl
 	    << "# temperature : " << temperature << std::endl
-	    << "# sims per gen : " << g_size << std::endl
+	    << "# simulations (no. reevaluations): " << g_world_size <<
+	    " (" << reevaluation_size << ")" << std::endl
 	    << "# rng seed : " << rng_seed << std::endl
 	    << "# translation params : " << speedparams_path << std::endl
 	    ;
@@ -531,26 +577,30 @@ int main(int argc, char** argv)
     std::unique_ptr<char []> aa_sequence_str(new char[protein_length+1]);
     double old_fitness = 0.001;
     double fitness;
+    double old_folded_fraction;
+    double folded_fraction;
     double selection;
     double fixation;
-    std::vector<int> old_nuc_sequence = nuc_sequence;
     std::vector<int> temp_sequence;
     std::vector<std::string> latfoldvec_command;
-    std::vector<std::string> latmaptraj_command;
+    // For reevaluation of the last accepted generation:
+    std::vector<std::string> prev_latfoldvec_command;
+    // std::vector<std::string> latmaptraj_command;
     std::string output_dir;
-    std::string outfile_base;
+    std::string hdf5_output_file;
     int accept;
+    int last_accepted_gen = 0;
+    int n_gens_without_mutation = 0;
 
-    // Begin running simulation
+    // Begin running simulation loop
     for (int gen=0; gen<n_gens; gen++)
     {
 	// Compose the simulation parameters
 	// For now, the final time is taken to be for stop codon UAA
 	translation_schedule = make_translation_schedule(
 	    translation_times, codon_sequence, stop_codon_times[0]);
-
-	PrintAASequence(aa_sequence_str.get(), aa_sequence.data(), protein_length);
-
+	PrintAASequence(
+	    aa_sequence_str.get(), aa_sequence.data(), protein_length);
 	latfoldvec_command = compose_latfoldvec_command(
 	    latpack_path,
 	    aa_sequence_str.get(),
@@ -559,32 +609,46 @@ int main(int argc, char** argv)
 	    temperature,
 	    latfold_output_frequency);
 
-	output_dir = tempfile_path + "/fold_evo__gen"
-	    + std::to_string(gen);
-
-	if (!g_rank)
+	if (proc_does_reevaluation && gen)
 	{
-	    if (mkdir(output_dir.c_str(), 0754) == -1)
-	    {
-		std::cerr << "Error making dir: " << output_dir << std::endl;
-		exit(IO_ERROR);
-	    }
+	    output_dir = h5file_path + "/gen"
+		+ std::to_string(last_accepted_gen);
+	    hdf5_output_file = output_dir + "/" + "sim"
+		+ std::to_string(n_gens_without_mutation + 1) + "_"
+		+ std::to_string(g_subcomm_rank) + ".h5";
+	    run_latfoldvec(prev_latfoldvec_command, hdf5_output_file);
+	    folded_fraction = evaluate_folded_fraction(hdf5_output_file);
+
+	    // Now update old fitness
+	    old_folded_fraction = reaverage_folded_fraction(
+		old_folded_fraction, folded_fraction, g_subcomm_size,
+		g_world_size, n_gens_without_mutation);
+	    old_fitness = calculate_fitness(old_folded_fraction);
 	}
-	outfile_base = output_dir + "/" + "sim";
+	else if (!proc_does_reevaluation)
+	{
+	    output_dir = h5file_path + "/gen"
+		+ std::to_string(gen);
 
-	MPI_Barrier(MPI_COMM_WORLD);
+	    if (!g_subcomm_rank)
+	    {
+		if (mkdir(output_dir.c_str(), 0754) == -1)
+		{
+		    std::cerr << "Error making dir: " << output_dir << std::endl;
+		    exit(IO_ERROR);
+		}
+	    }
+	    hdf5_output_file = output_dir + "/" + "sim0_"
+		+ std::to_string(g_subcomm_rank) + ".h5";
 
-	// Run simulation(s)
-	run_latfoldvec(latfoldvec_command, outfile_base);
+	    run_latfoldvec(latfoldvec_command, hdf5_output_file);
+	    folded_fraction = evaluate_folded_fraction(hdf5_output_file);
+	    fitness = calculate_fitness(folded_fraction);
+	}
+	MPI_Bcast(&fitness, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
+	MPI_Bcast(&folded_fraction, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
+	MPI_Bcast(&old_fitness, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-	// Run analysis (currently not used)
-	// latmaptraj_command = compose_latmaptraj_command(
-	//     latpack_path, folded_conformation);
-
-	// run_latmaptraj(latmaptraj_command, outfile_base, n_simulations);
-
-	// Evaluate fitness
-	fitness = evaluate_fitness(outfile_base);
 	selection = (fitness - old_fitness) / old_fitness;
 	if (selection == 0.)
 	    fixation = 1 / (double)population_size;
@@ -593,7 +657,7 @@ int main(int argc, char** argv)
 		(1 - exp(-2 * population_size * selection));
 
 	// Decide whether to accept
-	if (!g_rank)
+	if (!g_world_rank)
 	{
 	    // Root node decide accept / reject
 	    if (fixation > threefryrand())
@@ -602,7 +666,8 @@ int main(int argc, char** argv)
 		accept = false;
 
 	    // Output information
-	    cout_state(outstream, gen, aa_sequence, nuc_sequence, fitness, accept);
+	    cout_state(outstream, gen, aa_sequence, nuc_sequence, old_fitness,
+		       fitness, accept);
 	}
 
 	// Let everyone know accept / reject
@@ -612,18 +677,23 @@ int main(int argc, char** argv)
 	if (accept)
 	{
 	    // Update so that nuc_sequence and fitness are fixed
-	    old_nuc_sequence = nuc_sequence;
+	    prev_nuc_sequence = nuc_sequence;
+	    prev_latfoldvec_command = latfoldvec_command;
+	    old_folded_fraction = folded_fraction;
 	    old_fitness = fitness;
+	    n_gens_without_mutation = 0;
+	    last_accepted_gen = gen;
 	}
 	else
 	{
 	    // Revert
-	    nuc_sequence = old_nuc_sequence;
+	    nuc_sequence = prev_nuc_sequence;
+	    n_gens_without_mutation++;
 	}
 
 	// Make new mutation. We only do this on root node because of
 	// independent rng streams for different nodes.
-	if (!g_rank)
+	if (!g_world_rank)
 	{
 	    do
 	    {
@@ -643,9 +713,9 @@ int main(int argc, char** argv)
 	// and update sequences
 	NucSeqToCodonSeq(nuc_sequence.data(), nuc_length, codon_sequence.data());
 	NucSeqToAASeq(nuc_sequence.data(), nuc_length, aa_sequence.data());
-
     }
     
+    MPI_Comm_free(&g_subcomm);
     MPI_Finalize();
 
     return 0;
@@ -655,7 +725,8 @@ int main(int argc, char** argv)
 // Print this program's help message
 void print_help()
 {
-    std::cerr << helptext;
+    if (!g_world_rank)
+	std::cerr << helptext;
 }
 
 
@@ -677,7 +748,7 @@ std::vector<char *> string_vec_to_cstring_vec(
 // Given a codon sequence and a dictionary linking codons and
 // translation times, make a string of space-separated translation times.
 std::string make_translation_schedule(
-    const CodonIntMap & times,
+    const std::vector<unsigned int> & times,
     const std::vector<Codon> & codon_sequence,
     const int & final_time)
 {
@@ -716,6 +787,7 @@ std::vector<std::string> compose_latfoldvec_command(
     command.push_back("-maxStepsIncrease");
     command.push_back("-ribosome");
     command.push_back("-ribosomeRelease"); // do we want this?
+    // command.push_back("-out=N");
     command.push_back("-out=S");
     command.push_back("-outFreq=" + std::to_string(output_frequency));
     
@@ -732,13 +804,12 @@ std::vector<std::string> compose_latfoldvec_command(
 // simulation.
 void run_latfoldvec(
     std::vector<std::string> & latfoldvec_command,
-    const std::string & h5file_base)
+    const std::string & outfile)
 {
     // Add additional parameters
     latfoldvec_command.push_back(
 	"-seed=" + std::to_string(threefryrand_int() % INT32_MAX));
-    latfoldvec_command.push_back(
-	"-outFile=" + h5file_base + std::to_string(g_rank) + ".h5");
+    latfoldvec_command.push_back("-outFile=" + outfile);
     // latfoldvec_command.push_back("-title=?");
 
     std::vector<char *> cstring_command_vec = string_vec_to_cstring_vec(
@@ -805,7 +876,7 @@ void run_latmaptraj(
     const std::string& h5file_base,
     int n_simulations)
 {
-    for (int i=g_rank*n_simulations; i<(g_rank+1)*n_simulations; ++i)
+    for (int i=g_world_rank*n_simulations; i<(g_world_rank+1)*n_simulations; ++i)
     {
 	pid_t pid = fork();
 	if (pid == -1)
@@ -855,20 +926,13 @@ void run_latmaptraj(
 
 // Analyze latFoldVec simulations to determine a fitness value for
 // protein under evaluation.
-double evaluate_fitness(
-    const std::string& h5file_base,
-    double f_0)
+double evaluate_folded_fraction(
+    const std::string& filename)
 {
-    auto fitness_func = [&](double frac_folded)
-    {
-	return 0.001 + frac_folded / (frac_folded + f_0);
-    };
-
     int folded = 0;
     int total_n_folded = 0;
 
     // Now for each hdf5 file, we need to read in the data
-    std::string filename = h5file_base + std::to_string(g_rank) + ".h5";
     hid_t file_id = H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
     hid_t group_id = H5Gopen2(file_id, "traj1", H5P_DEFAULT);
     hid_t attribute_id = H5Aopen(group_id, "Found final struct",  H5P_DEFAULT);
@@ -890,27 +954,53 @@ double evaluate_fitness(
     H5Gclose(group_id);
     H5Fclose(file_id);
 
-    if (g_rank)
+    if (g_subcomm_rank)
     {
 	// Send whether trajectory folded
-	MPI_Send(&folded, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
+	MPI_Send(&folded, 1, MPI_INT, 0, 0, g_subcomm);
     }
     else  // root node
     {
 	total_n_folded += folded;
-	for (int i=1; i<g_size; ++i)
+	for (int i=1; i<g_subcomm_size; ++i)
 	{
 	    MPI_Recv(&folded, 1, MPI_INT, MPI_ANY_SOURCE, 0,
-		     MPI_COMM_WORLD, &g_status);
+		     g_subcomm, &g_status);
 	    total_n_folded += folded;
 	}
     }
     // Let everyone know total folded
-    MPI_Bcast(&total_n_folded, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&total_n_folded, 1, MPI_INT, 0, g_subcomm);
 	     
-    double frac_folded = total_n_folded / (double)g_size;
+    double folded_fraction = total_n_folded / (double)g_subcomm_size;
     
-    return fitness_func(frac_folded);
+    return folded_fraction;
+}
+
+
+// Calculate fitness from folded fraction.
+double calculate_fitness(
+    double folded_fraction,
+    double f_0)
+{
+    return 0.001 + folded_fraction / (folded_fraction + f_0);    
+}
+
+
+// Update fitness to incorporate new fitness evaluations.
+double reaverage_folded_fraction(
+    double old_folded_fraction,
+    double new_folded_fraction,
+    int n_reevaluators,
+    int n_total,
+    int n_gens_without_mutation)
+{
+    double old_factor = (n_total + n_reevaluators * (n_gens_without_mutation - 1))
+	/ (double)(n_total + n_gens_without_mutation * n_reevaluators);
+    double new_factor = n_reevaluators
+	/ (double)(n_total + n_gens_without_mutation * n_reevaluators);
+    return old_folded_fraction * old_factor
+	+ new_folded_fraction * new_factor;
 }
 
 
@@ -931,13 +1021,14 @@ void cout_header(
     *outstream << shorten("AA sequence", aa_sequence.size()) << "|";
     *outstream << shorten("Nuc sequence", nuc_sequence.size()) << "|";
     *outstream << 
-	std::setw(5) << "Fit." << "|" <<
+	std::setw(8) << "Old fit." << "|" <<
+	std::setw(8) << "New fit." << "|" <<
 	std::setw(6) << "Accept" << std::endl;
 
     int line_length = 4;
     line_length += aa_sequence.size() + 1;
     line_length += nuc_sequence.size() + 1;
-    line_length += 5 + 1;
+    line_length += 16 + 2;
     line_length += 6;
 
     *outstream << "# " << std::string(line_length, '-')<< std::endl;
@@ -954,7 +1045,8 @@ void cout_state(
     int generation,
     std::vector<AminoAcid> & aa_sequence,
     std::vector<int> & nuc_sequence,
-    double fitness,
+    double old_fitness,
+    double new_fitness,
     bool accept)
 {
     auto aa_seq_len = aa_sequence.size();
@@ -968,12 +1060,10 @@ void cout_state(
 	       << std::setw(5) << generation << " "
 	       << std::setw(aa_seq_len) << aa_seq_str.get() << " "
 	       << std::setw(nuc_seq_len) << nuc_seq_str.get() << " "
-	       << std::setw(5) << fitness
+	       << std::setw(8) << old_fitness << " "
+	       << std::setw(8) << new_fitness << " "
 	       << std::setw(6) << ((accept) ? "yes" : "no")
 	       << std::endl;
 
     return;    
 }
-
-
-

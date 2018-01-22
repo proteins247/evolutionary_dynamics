@@ -202,7 +202,7 @@ void CopyIntToCharSeq(char *dest, int *src, int Len);
  * ReadTranslationTimes opens file at filename and reads in
  * translation times to an int array.
  *
- * times should hold at least 0x333 + 2 ints s.t. random access using
+ * times should hold at least 0x333 + 1 ints s.t. random access using
  * enum Codon values is possible. Memory is cheap and 820 ints is only
  * 3280 bytes
  *
