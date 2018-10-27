@@ -1,5 +1,5 @@
 /* 
- * folding_evolution v0.0.1
+ * folding_evolution v0.0.2
  *
  * Monoclonal simulation
  */
