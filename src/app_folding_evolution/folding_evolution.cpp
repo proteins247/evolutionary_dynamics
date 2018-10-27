@@ -218,7 +218,8 @@ void run_latmaptraj(
 // @param filename The partial name of the file hdf5 output was
 //        written to.
 // @param total_translation_steps Total number of MC steps needed
-// @param degradation_param 
+// @param degradation_param Timescale that unfolded protein degradation
+//        acts on.
 double evaluate_folded_fraction(
     const std::string& filename,
     int total_translation_steps,
@@ -1176,7 +1177,7 @@ double evaluate_folded_fraction(
 	int posttranslation_steps = last_step - total_translation_steps;
 	double posttranslation_time = posttranslation_steps / protein_length;
 	double degradation_probability = 1 - exp(
-	    -degradation_param * posttranslation_time);
+	    -posttranslation_time / degradation_param);
 	if (threefryrand() > degradation_probability)
 	    folded = 1;
     }
