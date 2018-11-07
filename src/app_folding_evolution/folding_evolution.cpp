@@ -236,7 +236,7 @@ double calculate_fitness(
     double f_0=0.5);
 
 
-// Update fitness to incorporate new fitness evaluations.
+// Update folded fraction to incorporate new folding simulations.
 //
 // @param old_folded_fraction The previously estimated folded fraction.
 // @param new_folded_fraction The newly estimated folded fraction.
@@ -724,7 +724,7 @@ int main(int argc, char** argv)
 	// The probability of posttranslation degradation is 1 - exp(-kt)
 	// where k = degradation_param and t = time since translation (ribosome release)
 	// Set it to be log(8) / k. (87.5% probability of degradation).
-	posttranslational_folding_time = log(8) / degradation_param;
+	posttranslational_folding_time = log(8) * degradation_param;
 	translation_schedule = make_translation_schedule(
 	    translation_times, codon_sequence, stop_codon_times[0],
 	    total_translation_steps);
@@ -1223,7 +1223,7 @@ double calculate_fitness(
 }
 
 
-// Update fitness to incorporate new fitness evaluations.
+// Update folded fraction to incorporate new folding simulations.
 double reaverage_folded_fraction(
     double old_folded_fraction,
     double new_folded_fraction,
@@ -1231,6 +1231,7 @@ double reaverage_folded_fraction(
     int n_total,
     int n_gens_without_mutation)
 {
+    // We calculate a weighted average, so here we get the weights.
     double old_factor = (n_total + n_reevaluators * (n_gens_without_mutation - 1))
 	/ (double)(n_total + n_gens_without_mutation * n_reevaluators);
     double new_factor = n_reevaluators
