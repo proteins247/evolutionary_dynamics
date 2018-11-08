@@ -111,7 +111,7 @@ static const int GENS_MAX = 99999;
 static const std::string DEFAULT_LATPACK_PATH = "/n/home00/vzhao/pkg/latPack/1.9.1-8/";
 static const std::string DEFAULT_OUTPATH = "./out";
 static const uint64_t DEFAULT_SEED = 1;
-static const int DEFAULT_LATFOLD_OUTFREQ = 1000;
+static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
 static const int DEFAULT_POPULATION_SIZE = 500;
 static const int DEFAULT_MUTATION_MODE = 2;    // MutateAll default value
 static const double DEFAULT_TEMPERATURE = 0.3;
@@ -803,7 +803,7 @@ int main(int argc, char** argv)
 	if (!g_world_rank)
 	{
 	    // Root node decide accept / reject
-	    if (fixation > threefryrand() || gen == 0)
+	    if (threefryrand() < fixation || gen == 0)
 		accept = true;
 	    else
 		accept = false;
@@ -819,6 +819,10 @@ int main(int argc, char** argv)
 	// Update / revert
 	if (accept)
 	{
+	    // Update json log only when accept.
+	    if (!g_world_rank)
+		save_state(jsonLog, gen, aa_sequence, nuc_sequence, old_fitness,
+			   fitness, accept);
 	    // Update so that nuc_sequence and fitness are fixed
 	    prev_nuc_sequence = nuc_sequence;
 	    prev_latfoldvec_command = latfoldvec_command;
@@ -826,10 +830,6 @@ int main(int argc, char** argv)
 	    old_fitness = fitness;
 	    n_gens_without_mutation = 0;
 	    last_accepted_gen = gen;
-	    // Update json log only when accept.
-	    if (!g_world_rank)
-		save_state(jsonLog, gen, aa_sequence, nuc_sequence, old_fitness,
-			   fitness, accept);
 	}
 	else
 	{
