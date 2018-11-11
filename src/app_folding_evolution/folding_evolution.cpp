@@ -1,5 +1,5 @@
 /* 
- * folding_evolution v0.0.2
+ * folding_evolution v0.0.3
  *
  * Monoclonal simulation
  */
@@ -170,7 +170,7 @@ std::string make_translation_schedule(
     const std::vector<unsigned int> & times,
     const std::vector<Codon> & codon_sequence,
     const int final_time,
-    int & total_translation_steps);
+    int* total_translation_steps);
 
 
 // Build a vector of strings that are arguments to invoke
@@ -220,10 +220,12 @@ void run_latmaptraj(
 // @param total_translation_steps Total number of MC steps needed
 // @param degradation_param Timescale that unfolded protein degradation
 //        acts on.
+// @param native_energy Value is updated with native energy.
 double evaluate_folded_fraction(
     const std::string& filename,
     int total_translation_steps,
-    double degradation_param);
+    double degradation_param,
+    double* native_energy);
 
 
 // Calculate fitness from folded fraction.
@@ -270,6 +272,7 @@ void cout_state(
     std::vector<int> & nuc_sequence,
     double old_fitness,
     double new_fitness,
+    double native_energy,
     bool accept);
 
 
@@ -277,10 +280,15 @@ void cout_state(
 void save_state(
     json& jsonLog,
     int generation,
+    int n_gens_without_mutation,
+    int mutation_type,
     std::vector<AminoAcid> & aa_sequence,
     std::vector<int> & nuc_sequence,
     double old_fitness,
     double new_fitness,
+    double old_folded_fraction,
+    double new_folded_fraction,
+    double native_energy,
     bool accept);
 
 
@@ -705,10 +713,12 @@ int main(int argc, char** argv)
     int total_translation_steps;
     int last_accepted_gen = 0;
     int n_gens_without_mutation = 0;
+    int mutation_type = -1;
     double old_fitness = 0.001;
     double fitness;
     double old_folded_fraction = 0;
     double folded_fraction;
+    double native_energy;
     double selection;
     double fixation;
     std::string translation_schedule;
@@ -727,7 +737,7 @@ int main(int argc, char** argv)
 	posttranslational_folding_time = log(8) * degradation_param;
 	translation_schedule = make_translation_schedule(
 	    translation_times, codon_sequence, stop_codon_times[0],
-	    total_translation_steps);
+	    &total_translation_steps);
 	PrintAASequence(
 	    aa_sequence_str.get(), aa_sequence.data(), protein_length);
 	latfoldvec_command = compose_latfoldvec_command(
@@ -750,9 +760,10 @@ int main(int argc, char** argv)
 			     << "_" << std::setw(5) << g_subcomm_rank << ".h5";
 
 	    run_latfoldvec(prev_latfoldvec_command, hdf5_output_file.str());
+	    MPI_Barrier(g_subcomm); // let everything finish
 	    folded_fraction = evaluate_folded_fraction(
 		hdf5_output_file.str(), total_translation_steps,
-		degradation_param);
+		degradation_param, &native_energy);
 
 	    // Now update old fitness
 	    old_folded_fraction = reaverage_folded_fraction(
@@ -782,14 +793,17 @@ int main(int argc, char** argv)
 			     << "_" << std::setw(5) << g_subcomm_rank << ".h5";
 
 	    run_latfoldvec(latfoldvec_command, hdf5_output_file.str());
+	    MPI_Barrier(g_subcomm); // let everything finish
 	    folded_fraction = evaluate_folded_fraction(
 		hdf5_output_file.str(), total_translation_steps,
-		degradation_param);
+		degradation_param, &native_energy);
 	    fitness = calculate_fitness(folded_fraction);
 	}
+	MPI_Bcast(&native_energy, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
 	MPI_Bcast(&fitness, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
 	MPI_Bcast(&folded_fraction, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
 	MPI_Bcast(&old_fitness, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	MPI_Bcast(&old_folded_fraction, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
 	selection = (fitness / old_fitness) - 1;
 	if (selection == 0.)
@@ -810,7 +824,11 @@ int main(int argc, char** argv)
 
 	    // Output information
 	    cout_state(outstream, gen, aa_sequence, nuc_sequence, old_fitness,
-		       fitness, accept);
+		       fitness, native_energy, accept);
+	    save_state(jsonLog, gen, n_gens_without_mutation, mutation_type,
+		       aa_sequence, nuc_sequence, old_fitness, fitness,
+		       old_folded_fraction, folded_fraction, native_energy,
+		       (bool)accept);
 	}
 
 	// Let everyone know accept / reject
@@ -819,10 +837,6 @@ int main(int argc, char** argv)
 	// Update / revert
 	if (accept)
 	{
-	    // Update json log only when accept.
-	    if (!g_world_rank)
-		save_state(jsonLog, gen, aa_sequence, nuc_sequence, old_fitness,
-			   fitness, accept);
 	    // Update so that nuc_sequence and fitness are fixed
 	    prev_nuc_sequence = nuc_sequence;
 	    prev_latfoldvec_command = latfoldvec_command;
@@ -845,10 +859,11 @@ int main(int argc, char** argv)
 	    do
 	    {
 		std::vector<int> temp_sequence = nuc_sequence;
-		int m = PointMutateNucSequence(nuc_sequence.data(), nuc_length);
-		if (m == mutation_mode)
+		mutation_type = PointMutateNucSequence(
+		    nuc_sequence.data(), nuc_length);
+		if (mutation_type == mutation_mode)
 		    break;
-		if (mutation_mode == MutateAll && m >= 0)
+		if (mutation_mode == MutateAll && mutation_type >= 0)
 		    break;
 		nuc_sequence = temp_sequence;
 	    } while (true);
@@ -961,10 +976,10 @@ std::string make_translation_schedule(
     const std::vector<unsigned int> & times,
     const std::vector<Codon> & codon_sequence,
     const int final_time,
-    int & total_translation_steps)
+    int* total_translation_steps)
 {
     std::ostringstream os;
-    total_translation_steps = 0;
+    *total_translation_steps = 0;
     int protein_length = 5;
 
     // Note that we skip the first five codons (start at the
@@ -974,11 +989,11 @@ std::string make_translation_schedule(
 	 codon != codon_sequence.end(); ++codon)
     {
 	os << times.at(*codon) << " ";
-	total_translation_steps += times.at(*codon) * protein_length;
+	*total_translation_steps += times.at(*codon) * protein_length;
 	++protein_length;
     }
     os << final_time;
-    total_translation_steps += final_time * protein_length;
+    *total_translation_steps += final_time * protein_length;
     return os.str();
 }
 
@@ -1148,7 +1163,8 @@ void run_latmaptraj(
 double evaluate_folded_fraction(
     const std::string& filename,
     int total_translation_steps,
-    double degradation_param)
+    double degradation_param,
+    double* native_energy)
 {
     int folded = 0;
     int total_n_folded = 0;
@@ -1165,11 +1181,14 @@ double evaluate_folded_fraction(
     hid_t strtype = H5Tcopy(H5T_C_S1);
     H5Tset_size(strtype, 4);
     hid_t last_step_attr = H5Aopen(group_id, "Last step", H5P_DEFAULT);
+    hid_t last_energy_attr = H5Aopen(group_id, "Last E", H5P_DEFAULT);
 
     char found_final[4];
     int last_step;
+    double last_energy;
 
     H5Aread(found_final_attr, strtype, found_final);
+    H5Aread(last_energy_attr, H5T_NATIVE_DOUBLE, &last_energy);
     H5Aread(last_step_attr, H5T_NATIVE_UINT, &last_step);
 
     if (std::strncmp(found_final, "yes", 3) == 0)
@@ -1181,12 +1200,17 @@ double evaluate_folded_fraction(
 	if (threefryrand() > degradation_probability)
 	    folded = 1;
     }
+    else
+    {
+	last_energy = 0;
+    }
 	
     H5Tclose(strtype);
     H5Tclose(sequence_attr_t);
     H5Aclose(sequence_attr);
     H5Aclose(found_final_attr);
     H5Aclose(last_step_attr);
+    H5Aclose(last_energy_attr);    
     H5Gclose(group_id);
     H5Fclose(file_id);
 
@@ -1207,8 +1231,11 @@ double evaluate_folded_fraction(
     }
     // Let everyone know total folded
     MPI_Bcast(&total_n_folded, 1, MPI_INT, 0, g_subcomm);
-	     
     double folded_fraction = total_n_folded / (double)g_subcomm_size;
+
+    // Also determine native energy
+    MPI_Allreduce(&last_energy, native_energy, 1, MPI_DOUBLE, MPI_MIN,
+		  g_subcomm);
     
     return folded_fraction;
 }
@@ -1259,12 +1286,14 @@ void cout_header(
     *outstream << 
 	std::setw(8) << "Old fit." << "|" <<
 	std::setw(8) << "New fit." << "|" <<
-	std::setw(6) << "Accept" << std::endl;
+	std::setw(7) << "Nat. E." << "|" <<
+	std::setw(6) << "Accept"
+	       << std::endl;
 
     int line_length = 4;
     line_length += aa_sequence.size() + 1;
     line_length += nuc_sequence.size() + 1;
-    line_length += 16 + 2;
+    line_length += 23 + 3;
     line_length += 6;
 
     *outstream << "# " << std::string(line_length, '-')<< std::endl;
@@ -1283,6 +1312,7 @@ void cout_state(
     std::vector<int> & nuc_sequence,
     double old_fitness,
     double new_fitness,
+    double native_energy,
     bool accept)
 {
     auto aa_seq_len = aa_sequence.size();
@@ -1298,6 +1328,7 @@ void cout_state(
 	       << std::setw(nuc_seq_len) << nuc_seq_str.get() << " "
 	       << std::setw(8) << old_fitness << " "
 	       << std::setw(8) << new_fitness << " "
+	       << std::setw(7) << native_energy << " "	
 	       << std::setw(6) << ((accept) ? "yes" : "no")
 	       << std::endl;
 
@@ -1309,10 +1340,15 @@ void cout_state(
 void save_state(
     json& jsonLog,
     int generation,
+    int n_gens_without_mutation,
+    int mutation_type,
     std::vector<AminoAcid> & aa_sequence,
     std::vector<int> & nuc_sequence,
     double old_fitness,
     double new_fitness,
+    double old_folded_fraction,
+    double new_folded_fraction,
+    double native_energy,
     bool accept)
 {
     auto aa_seq_len = aa_sequence.size();
@@ -1321,13 +1357,23 @@ void save_state(
     std::unique_ptr<char []> nuc_seq_str(new char[nuc_seq_len+1]);
     PrintAASequence(aa_seq_str.get(), aa_sequence.data(), aa_seq_len);
     PrintNucCodeSequence(nuc_seq_str.get(), nuc_sequence.data(), nuc_seq_len);
+    
+    int n_evaluations =
+	n_gens_without_mutation * (int)jsonLog["reevaluation size"]
+	+ ((int)jsonLog["simulations per gen"]
+	   - (int)jsonLog["reevaluation size"]);
 
     json entry;
     entry["generation"] = generation;
-    entry["old fitness"] = old_fitness;
-    entry["new fitness"] = new_fitness;
+    entry["evaluations"] = n_evaluations;
+    entry["mutation type"] = mutation_type;
     entry["aa sequence"] = aa_seq_str.get();
     entry["nuc sequence"] = nuc_seq_str.get();
+    entry["old fitness"] = old_fitness;
+    entry["new fitness"] = new_fitness;
+    entry["old folded fraction"] = old_folded_fraction;
+    entry["new folded fraction"] = new_folded_fraction;
+    entry["native energy"] = native_energy;
     entry["accepted"] = accept;
     jsonLog["trajectory"].push_back(entry);
     return;
