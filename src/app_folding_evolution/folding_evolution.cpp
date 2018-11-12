@@ -116,6 +116,7 @@ static const int DEFAULT_POPULATION_SIZE = 500;
 static const int DEFAULT_MUTATION_MODE = 2;    // MutateAll default value
 static const double DEFAULT_TEMPERATURE = 0.3;
 static const double DEFAULT_REEVALUATION_RATIO = 0.5;
+static const double DEFAULT_FITNESS_CONSTANT = 0.5;
 static const double DEFAULT_DEGRADATION_PARAM = 1000000;
 
 static const std::vector<Codon> STOP_CODONS = {N_UAA, N_UAG, N_UGA};
@@ -235,7 +236,7 @@ double evaluate_folded_fraction(
 // @param f_0 Fitness function parameter
 double calculate_fitness(
     double folded_fraction,
-    double f_0=0.5);
+    double f_0=DEFAULT_FITNESS_CONSTANT);
 
 
 // Update folded fraction to incorporate new folding simulations.
@@ -569,7 +570,7 @@ int main(int argc, char** argv)
 	exit(IO_ERROR);
     }
     latSimOutPath = outPath + "/latfoldvec_simulations";
-    jsonLogPath = outPath + "/log.json";
+    jsonLogPath = outPath + "/simulation_log.json";
 
     if (!g_world_rank)
     {
@@ -588,6 +589,12 @@ int main(int argc, char** argv)
 	    print_error(err.str(), debug_mode);
 	    MPI_Abort(MPI_COMM_WORLD, IO_ERROR);
 	}
+    }
+
+    // Wait for slow network file system
+    while (!isDirExist(latSimOutPath))
+    {
+	sleep(1);
     }
     
     // Process the user-provided sequence
@@ -787,7 +794,14 @@ int main(int argc, char** argv)
 		    MPI_Abort(MPI_COMM_WORLD, IO_ERROR);
 		}
 	    }
-	    MPI_Barrier(g_subcomm); // wait for mkdir
+
+            // wait for mkdir
+	    MPI_Barrier(g_subcomm); 
+	    while (!isDirExist(output_dir.str()))
+	    {
+		sleep(1);
+	    }
+
 	    hdf5_output_file << output_dir.str() << "/sim" << std::setfill('0')
 			     << std::setw(5) << 0
 			     << "_" << std::setw(5) << g_subcomm_rank << ".h5";
