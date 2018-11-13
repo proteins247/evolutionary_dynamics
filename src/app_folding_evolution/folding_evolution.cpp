@@ -13,6 +13,7 @@
 #include <memory>
 #include <csignal> 		// eventually need to think about handling interrupts
 #include <cstring>
+#include <cstdio>
 #include <cmath>
 #include <map>
 
@@ -69,6 +70,7 @@ static const std::string helptext =
     "                            as a latPack-style move sequence.\n"
     "  -s, --speed-params=FILE   REQUIRED. Path to file with translation\n"
     "                            times of the codons.\n"
+    // "  -c, --conformation        latFoldVec, save conformations.\n"
     "  -d, --debug               Allow error messages from all processors.\n"
     "  -k, --degradation-param=K Value setting timescale for unfolded protein\n"
     "                            degradation (penalizes slow folding).\n"
@@ -111,12 +113,13 @@ static const int GENS_MAX = 99999;
 static const std::string DEFAULT_LATPACK_PATH = "/n/home00/vzhao/pkg/latPack/1.9.1-8/";
 static const std::string DEFAULT_OUTPATH = "./out";
 static const uint64_t DEFAULT_SEED = 1;
-static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
+static const int DEFAULT_LATFOLD_OUTFREQ = 10000;
+static const int DEFAULT_JSON_OUTFREQ = 5;
 static const int DEFAULT_POPULATION_SIZE = 500;
 static const int DEFAULT_MUTATION_MODE = 2;    // MutateAll default value
 static const double DEFAULT_TEMPERATURE = 0.3;
 static const double DEFAULT_REEVALUATION_RATIO = 0.5;
-static const double DEFAULT_FITNESS_CONSTANT = 0.5;
+static const double DEFAULT_FITNESS_CONSTANT = 0.75;
 static const double DEFAULT_DEGRADATION_PARAM = 1000000;
 
 static const std::vector<Codon> STOP_CODONS = {N_UAA, N_UAG, N_UGA};
@@ -183,7 +186,8 @@ std::vector<std::string> compose_latfoldvec_command(
     const std::string& translation_schedule,
     const int& full_length_time,
     const double& temperature,
-    const int& output_frequency);
+    const int& output_frequency,
+    bool save_conformations);
 
 
 // Use fork and exec to run a latFoldVec co-translational folding
@@ -293,6 +297,12 @@ void save_state(
     bool accept);
 
 
+// Write json file (does overwrite)
+void write_log(
+    const json& jsonLog,
+    const std::string& jsonLogPath);
+
+
 int main(int argc, char** argv)
 {
     // MPI init stuff
@@ -319,6 +329,7 @@ int main(int argc, char** argv)
 
     // Other params:
     bool debug_mode = false;
+    bool save_conformations = true;
     int random_codons = 0;
     int population_size = DEFAULT_POPULATION_SIZE;
     std::string folded_conformation;
@@ -368,6 +379,7 @@ int main(int argc, char** argv)
 	{"seed", required_argument, NULL, 'r'},
 	{"speed-params", required_argument, NULL, 's'},
 	{"temperature", required_argument, NULL, 't'},
+	// {"conformation", no_argument, NULL, 'c'},
 	{"debug", no_argument, NULL, 'd'},
 	{"help", no_argument, NULL, 'h'},
 	{NULL, 0, NULL, 0}
@@ -382,6 +394,9 @@ int main(int argc, char** argv)
 	case 'h':
 	    print_help();
 	    exit(0);
+	// case 'c':
+	//     save_conformations = true;
+	//     break;
 	case 'd':
 	    debug_mode = true;
 	    break;
@@ -592,6 +607,7 @@ int main(int argc, char** argv)
     }
 
     // Wait for slow network file system
+    MPI_Barrier(MPI_COMM_WORLD);
     while (!isDirExist(latSimOutPath))
     {
 	sleep(1);
@@ -754,7 +770,8 @@ int main(int argc, char** argv)
 	    translation_schedule,
 	    posttranslational_folding_time,
 	    temperature,
-	    latfold_output_frequency);
+	    latfold_output_frequency,
+	    save_conformations);
 
 	if (proc_does_reevaluation && gen > 0)
 	{
@@ -767,7 +784,6 @@ int main(int argc, char** argv)
 			     << "_" << std::setw(5) << g_subcomm_rank << ".h5";
 
 	    run_latfoldvec(prev_latfoldvec_command, hdf5_output_file.str());
-	    MPI_Barrier(g_subcomm); // let everything finish
 	    folded_fraction = evaluate_folded_fraction(
 		hdf5_output_file.str(), total_translation_steps,
 		degradation_param, &native_energy);
@@ -807,7 +823,6 @@ int main(int argc, char** argv)
 			     << "_" << std::setw(5) << g_subcomm_rank << ".h5";
 
 	    run_latfoldvec(latfoldvec_command, hdf5_output_file.str());
-	    MPI_Barrier(g_subcomm); // let everything finish
 	    folded_fraction = evaluate_folded_fraction(
 		hdf5_output_file.str(), total_translation_steps,
 		degradation_param, &native_energy);
@@ -843,6 +858,10 @@ int main(int argc, char** argv)
 		       aa_sequence, nuc_sequence, old_fitness, fitness,
 		       old_folded_fraction, folded_fraction, native_energy,
 		       (bool)accept);
+	    if (gen % DEFAULT_JSON_OUTFREQ == 0)
+	    {
+		write_log(jsonLog, jsonLogPath);
+	    }
 	}
 
 	// Let everyone know accept / reject
@@ -892,18 +911,7 @@ int main(int argc, char** argv)
     }
 
     // finalize json log
-    if (!g_world_rank)
-    {
-	std::fstream out(jsonLogPath, std::ios::out);
-	if (!out.is_open())
-	{
-	    std::cerr << "Output file could not be opened";
-	    exit(1);
-	}
-
-	out << std::setw(2) << jsonLog << std::endl;
-	out.close();   
-    }
+    write_log(jsonLog, jsonLogPath);
     
     MPI_Comm_free(&g_subcomm);
     MPI_Finalize();
@@ -1021,7 +1029,8 @@ std::vector<std::string> compose_latfoldvec_command(
     const std::string& translation_schedule,
     const int& full_length_time,
     const double& temperature,
-    const int& output_frequency)
+    const int& output_frequency,
+    bool save_conformations)
 {
     std::vector<std::string> command;
 
@@ -1035,9 +1044,15 @@ std::vector<std::string> compose_latfoldvec_command(
     command.push_back("-ribosome");
     command.push_back("-ribosomeRelease");
     command.push_back("-fullLengthSteps=" + std::to_string(full_length_time));
-    // command.push_back("-out=N");
-    command.push_back("-out=S");
     command.push_back("-outFreq=" + std::to_string(output_frequency));
+    if (save_conformations)
+    {
+	command.push_back("-out=S");
+    }
+    else
+    {
+	command.push_back("-out=N");
+    }
     
     // Previously we did the what is commented out, but we want to
     // keep the command as a vector.
@@ -1060,10 +1075,24 @@ void run_latfoldvec(
     latfoldvec_command.push_back("-outFile=" + outfile);
     // latfoldvec_command.push_back("-title=?");
 
+    std::ostringstream command;
+    for (auto& arg : latfoldvec_command)
+    {
+	command << arg << " ";
+    }
+
     std::vector<char *> cstring_command_vec = string_vec_to_cstring_vec(
 	latfoldvec_command);
 
-    pid_t pid = fork();
+    // Temporarily suppress stdout
+    int bak, temp_fd;
+    fflush(stdout);
+    bak = dup(1);		// backup
+    temp_fd = open("/dev/null", O_WRONLY);
+    dup2(temp_fd, 1);
+    close(temp_fd);
+
+    pid_t pid = vfork();
     if (pid == -1)
     {
 	std::cerr << "Failed to fork" << std::endl;
@@ -1073,8 +1102,8 @@ void run_latfoldvec(
     {
 	// child
 	// suppress std out
-	int fd = open("/dev/null", O_WRONLY);
-	dup2(fd, 1);
+	// int fd = open("/dev/null", O_WRONLY);
+	// dup2(fd, 1);
 
 	execv(cstring_command_vec[0], cstring_command_vec.data());
     }
@@ -1093,82 +1122,89 @@ void run_latfoldvec(
 	    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
 	    {
 		std::cerr << "pid " << done << " failed" << std::endl;
+		std::cerr << command.str() << std::endl;
 		exit(LATPACK_ERROR);
 	    }
 	}
     }
+
+    // Restore stdout
+    fflush(stdout);
+    dup2(bak, 1);
+    close(bak);
+    return;
 }
 
 
 // Build a vector of strings that are arguments to invoke
 // latMapTraj. Note arguments -traj is not added here.
-std::vector<std::string> compose_latmaptraj_command(
-    const std::string& latpack_path,
-    const std::string& folded_conformation)
-{
-    std::vector<std::string> command;
-    command.push_back(latpack_path + "bin/latMapTraj");
-    command.push_back("-ref=" + folded_conformation);
-    command.push_back("-lat=CUB");
-    command.push_back("-hdf5");
-    return command;
-}
+// std::vector<std::string> compose_latmaptraj_command(
+//     const std::string& latpack_path,
+//     const std::string& folded_conformation)
+// {
+//     std::vector<std::string> command;
+//     command.push_back(latpack_path + "bin/latMapTraj");
+//     command.push_back("-ref=" + folded_conformation);
+//     command.push_back("-lat=CUB");
+//     command.push_back("-hdf5");
+//     return command;
+// }
 
 
 // FIXME (update to full MPI)
 // Use fork and exec to run n_simulations of latMapTraj to analyze the
 // latFoldVec simulations that were run.
 // this has not been updated yet (because function is not used)
-void run_latmaptraj(
-    std::vector<std::string> & latmaptraj_command,
-    const std::string& h5file_base,
-    int n_simulations)
-{
-    for (int i=g_world_rank*n_simulations; i<(g_world_rank+1)*n_simulations; ++i)
-    {
-	pid_t pid = fork();
-	if (pid == -1)
-	{
-	    std::cerr << "Failed to fork" << std::endl;
-	    exit(IO_ERROR);
-	}
-	else if (pid == 0)
-	{
-	    // child
-	    // we land here for each instance
-	    // Add additional parameters
-	    latmaptraj_command.push_back("-traj=" + h5file_base +
-					 std::to_string(i) + ".h5");
-	    std::vector<char *> cstring_command_vec = string_vec_to_cstring_vec(
-		latmaptraj_command);
+// void run_latmaptraj(
+//     std::vector<std::string> & latmaptraj_command,
+//     const std::string& h5file_base,
+//     int n_simulations)
+// {
+//     for (int i=g_world_rank*n_simulations; i<(g_world_rank+1)*n_simulations; ++i)
+//     {
+// 	pid_t pid = fork();
+// 	if (pid == -1)
+// 	{
+// 	    std::cerr << "Failed to fork" << std::endl;
+// 	    exit(IO_ERROR);
+// 	}
+// 	else if (pid == 0)
+// 	{
+// 	    // child
+// 	    // we land here for each instance
+// 	    // Add additional parameters
+// 	    latmaptraj_command.push_back("-traj=" + h5file_base +
+// 					 std::to_string(i) + ".h5");
+// 	    std::vector<char *> cstring_command_vec = string_vec_to_cstring_vec(
+// 		latmaptraj_command);
 
-	    // suppress std out
-	    int fd = open("/dev/null", O_WRONLY);
-	    dup2(fd, 1);
+// 	    // suppress std out
+// 	    int fd = open("/dev/null", O_WRONLY);
+// 	    dup2(fd, 1);
 
-	    execv(cstring_command_vec[0], cstring_command_vec.data());
-	}
-    }
+// 	    execv(cstring_command_vec[0], cstring_command_vec.data());
+// 	}
+//     }
 
-    // wait for processes to finish
-    while (true)
-    {
-	int status;
-	pid_t done = wait(&status);
-	if (done == -1)
-	{
-	    if (errno == ECHILD) break; // no more child processes
-	}
-	else
-	{
-	    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-	    {
-		std::cerr << "pid " << done << " failed" << std::endl;
-		exit(LATPACK_ERROR);
-	    }
-	}
-    }    
-}
+//     // wait for processes to finish
+//     while (true)
+//     {
+// 	int status;
+// 	pid_t done = wait(&status);
+// 	if (done == -1)
+// 	{
+// 	    if (errno == ECHILD) break; // no more child processes
+// 	}
+// 	else
+// 	{
+// 	    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+// 	    {
+// 		std::cerr << "pid " << done << " failed" << std::endl;
+// 		exit(LATPACK_ERROR);
+// 	    }
+// 	}
+//     }    
+// }
 
 
 
@@ -1379,7 +1415,7 @@ void save_state(
 
     json entry;
     entry["generation"] = generation;
-    entry["evaluations"] = n_evaluations;
+    entry["old evaluations"] = n_evaluations;
     entry["mutation type"] = mutation_type;
     entry["aa sequence"] = aa_seq_str.get();
     entry["nuc sequence"] = nuc_seq_str.get();
@@ -1390,5 +1426,26 @@ void save_state(
     entry["native energy"] = native_energy;
     entry["accepted"] = accept;
     jsonLog["trajectory"].push_back(entry);
+    return;
+}
+
+
+// Write json file (does overwrite)
+void write_log(
+    const json& jsonLog,
+    const std::string& jsonLogPath)
+{
+    if (!g_world_rank)
+    {
+	std::fstream out(jsonLogPath, std::ios::out | std::ios::trunc);
+	if (!out.is_open())
+	{
+	    std::cerr << "Output file could not be opened";
+	    exit(1);
+	}
+
+	out << std::setw(2) << jsonLog << std::endl;
+	out.close();
+    }
     return;
 }
