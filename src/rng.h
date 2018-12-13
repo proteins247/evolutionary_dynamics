@@ -22,9 +22,13 @@
 #ifndef RNG_H_
 #define RNG_H_
 
-/* Sets RNG seed */
+/* Sets RNG "seed" (state) */
 void set_threefry_array(uint64_t uk0, uint64_t uk1,
                         uint64_t uk2, uint64_t uk3);
+
+/* Returns RNG "seed" */
+/* Modifies current_key; it had better be >= 4 long  */
+void get_rng_state(uint64_t * current_key);
 
 /* Return double in range [0., 1.) */
 double threefryrand();

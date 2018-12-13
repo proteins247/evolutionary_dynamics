@@ -29,6 +29,14 @@ void set_threefry_array(uint64_t uk0, uint64_t uk1,
     key.v[3] = uk3;
 }
 
+void get_rng_state(uint64_t * current_key)
+{
+    current_key[0] = key.v[0];
+    current_key[1] = key.v[1];
+    current_key[2] = key.v[2];
+    current_key[3] = key.v[3];
+}
+
 double threefryrand()
 {
     if (randomNumberIndex == 4)
