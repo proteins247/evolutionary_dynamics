@@ -1,5 +1,5 @@
 /* 
- * folding_evolution v0.0.3
+ * folding_evolution v0.0.4
  *
  * Monoclonal simulation
  */
@@ -70,8 +70,9 @@ static const std::string helptext =
     "                            as a latPack-style move sequence.\n"
     "  -s, --speed-params=FILE   REQUIRED. Path to file with translation\n"
     "                            times of the codons.\n"
-    // "  -c, --conformation        latFoldVec, save conformations.\n"
+    "  -c, --save-conformation   Save latFoldVec simulation conformations.\n"
     "  -d, --debug               Allow error messages from all processors.\n"
+    "  -f, --from-checkpoint     Resume simulation from checkpoint file.\n"
     "  -k, --degradation-param=K Value setting timescale for unfolded protein\n"
     "                            degradation (penalizes slow folding).\n"
     "  -l, --latpack-path=PATH   Latpack binaries here. Default=\n"
@@ -146,6 +147,12 @@ bool isDirExist(const std::string& path);
 
 // creates directory from specified path (from sodapop)
 bool makePath(const std::string& path);
+
+// Load simulation checkpoint file.
+json openCheckpointFile(const std::string& checkpointPath);
+
+// Save simulation state so that simulation can be resumed.
+void makeCheckpoint();
 
 // Convert a vector of strings into a vector of char pointers for use
 // by execv family of commands. Adds a NULL element to the end.
@@ -329,15 +336,18 @@ int main(int argc, char** argv)
 
     // Other params:
     bool debug_mode = false;
-    bool save_conformations = true;
+    bool save_conformations = false;
+    bool resumeFromCheckpoint = false;
     int random_codons = 0;
     int population_size = DEFAULT_POPULATION_SIZE;
     std::string folded_conformation;
     std::string speedparams_path;
     std::string latpack_path = DEFAULT_LATPACK_PATH;
     std::string outPath = DEFAULT_OUTPATH;
+    std::string checkpointPath;
     std::string latSimOutPath;
     std::string jsonLogPath;	// we're going to log using json
+    json checkpoint;
     json jsonLog;
     std::ostream * outstream = &std::cout;
     double degradation_param = DEFAULT_DEGRADATION_PARAM;
@@ -369,6 +379,7 @@ int main(int argc, char** argv)
      * NULL and 0 otherwise.
      */
     static struct option long_options[] = {
+	{"from-checkpoint", required_argument, NULL, 'f'},
 	{"degradation-param", required_argument, NULL, 'k'},
 	{"latpack-path", required_argument, NULL, 'l'},
 	{"mutation-mode", required_argument, NULL, 'm'},
@@ -379,13 +390,13 @@ int main(int argc, char** argv)
 	{"seed", required_argument, NULL, 'r'},
 	{"speed-params", required_argument, NULL, 's'},
 	{"temperature", required_argument, NULL, 't'},
-	// {"conformation", no_argument, NULL, 'c'},
+	{"save-conformation", no_argument, NULL, 'c'},
 	{"debug", no_argument, NULL, 'd'},
 	{"help", no_argument, NULL, 'h'},
 	{NULL, 0, NULL, 0}
     };
 
-    while ((c = getopt_long(argc, argv, "k:l:m:n:o:p:r:s:t:hd",
+    while ((c = getopt_long(argc, argv, "f:k:l:m:n:o:p:r:s:t:hdc",
 			    long_options, &option_index))
 	   != -1)
     {
@@ -394,9 +405,14 @@ int main(int argc, char** argv)
 	case 'h':
 	    print_help();
 	    exit(0);
-	// case 'c':
-	//     save_conformations = true;
-	//     break;
+	case 'f':
+	    // We are resuming from checkpoint
+	    checkpointPath = optarg;
+	    resumeFromCheckpoint = true;
+	    goto checkpointBreakout;
+	case 'c':
+	    save_conformations = true;
+	    break;
 	case 'd':
 	    debug_mode = true;
 	    break;
@@ -509,64 +525,90 @@ int main(int argc, char** argv)
 	    print_error(err.str(), debug_mode);
 	    exit(PARSE_ERROR);
 	}
+    checkpointBreakout:
+	break;
     } // End while getopt_long
 
     // Continued parsing: positional arguments
-    if (optind + 2 == argc)
+    if (!resumeFromCheckpoint)
     {
-	sequence = argv[optind++];
-	try
+	if (optind + 2 == argc)
 	{
-	    n_gens = std::stoi(argv[optind]);
-	    if (n_gens > GENS_MAX)
+	    sequence = argv[optind++];
+	    try
+	    {
+		n_gens = std::stoi(argv[optind]);
+		if (n_gens > GENS_MAX)
+		{
+		    std::ostringstream err;
+		    err << "Provided N_GENS argument" << n_gens
+			<< "cannot exeed " << GENS_MAX << std::endl;
+		    print_error(err.str(), debug_mode);
+		    exit(PARSE_ERROR);
+		}
+	    }
+	    catch (const std::invalid_argument& e)
 	    {
 		std::ostringstream err;
-		err << "Provided N_GENS argument" << n_gens
-		    << "cannot exeed " << GENS_MAX << std::endl;
+		err << "Provided N_GENS argument " << argv[optind]
+		    << " could not be converted to uint" << std::endl;
+		print_error(err.str(), debug_mode);
+		exit(PARSE_ERROR);
+	    }
+	    catch (const std::out_of_range& e)
+	    {
+		// probably unlikely
+		std::ostringstream err;
+		err << "Provided N_GENS argument " << argv[optind]
+		    << " is out of range" << std::endl;
 		print_error(err.str(), debug_mode);
 		exit(PARSE_ERROR);
 	    }
 	}
-	catch (const std::invalid_argument& e)
+	else
 	{
 	    std::ostringstream err;
-	    err << "Provided N_GENS argument " << argv[optind]
-		<< " could not be converted to uint" << std::endl;
+	    err << "Expected two positional arguments: SEQUENCE NROUNDS"
+		<< std::endl;
+	    print_error(err.str(), debug_mode);
+	    print_help();
+	    exit(PARSE_ERROR);
+	}
+
+	// Complain about missing parameters here
+	if (folded_conformation.empty())
+	{
+	    std::ostringstream err;
+	    err << "Argument --native-fold (-n) is mandatory" << std::endl;
 	    print_error(err.str(), debug_mode);
 	    exit(PARSE_ERROR);
 	}
-	catch (const std::out_of_range& e)
+	if (speedparams_path.empty())
 	{
-	    // probably unlikely
-	    std::ostringstream err;
-	    err << "Provided N_GENS argument " << argv[optind]
-		<< " is out of range" << std::endl;
-	    print_error(err.str(), debug_mode);
+	    std::cerr << "Argument --speed-params (-s) is mandatory"
+		      << std::endl;
 	    exit(PARSE_ERROR);
 	}
     }
     else
     {
-	std::ostringstream err;
-	err << "Expected two positional arguments: SEQUENCE NROUNDS"
-	    << std::endl;
-	print_error(err.str(), debug_mode);
-	print_help();
-	exit(PARSE_ERROR);
-    }
-
-    // Complain about missing parameters here
-    if (folded_conformation.empty())
-    {
-	std::ostringstream err;
-	err << "Argument --native-fold (-n) is mandatory" << std::endl;
-	print_error(err.str(), debug_mode);
-	exit(PARSE_ERROR);
-    }
-    if (speedparams_path.empty())
-    {
-	std::cerr << "Argument --speed-params (-s) is mandatory" << std::endl;
-	exit(PARSE_ERROR);
+	std::string jsonLogPath;
+	int simulations_per_gen;
+	checkpoint = openCheckpointFile(checkpointPath);
+	
+	checkpoint.at("json log path").get_to(jsonLogPath);
+	std::ifstream jsonLogFile(jsonLogPath);
+	jsonLogFile >> jsonLog;
+	jsonLog.at("folded conformation").get_to(folded_conformation);
+	jsonLog.at("generations").get_to(n_gens);
+	jsonLog.at("population size").get_to(population_size);
+	jsonLog.at("temperature").get_to(temperature);
+	jsonLog.at("simulations per gen").get_to(simulations_per_gen);
+	jsonLog.at("reevaluation size").get_to(reevaluation_size);
+	jsonLog.at("degradation timescale").get_to(degradation_param);
+	jsonLog.at("latpack path").get_to(latpack_path);
+	jsonLog.at("translation params").get_to(speedparams_path);
+	jsonLog.at("mutation mode").get_to(mutation_mode);
     }
     
     // End option parsing
@@ -584,6 +626,7 @@ int main(int argc, char** argv)
 	print_error(err.str(), debug_mode);
 	exit(IO_ERROR);
     }
+    checkpointPath = outPath + "/checkpoint.json";
     latSimOutPath = outPath + "/latfoldvec_simulations";
     jsonLogPath = outPath + "/simulation_log.json";
 
@@ -613,6 +656,8 @@ int main(int argc, char** argv)
 	sleep(1);
     }
     
+    // #^@#$^@#$%@#$% checkpoint break here?
+
     // Process the user-provided sequence
     std::vector<int> nuc_sequence;
     std::vector<int> prev_nuc_sequence;
@@ -705,12 +750,14 @@ int main(int argc, char** argv)
     {
 	// json
 	jsonLog["sequence"] = sequence;
+	jsonLog["folded conformation"] = folded_conformation;
 	jsonLog["generations"] = n_gens;
 	jsonLog["population size"] = population_size;
 	jsonLog["temperature"] = temperature;
 	jsonLog["simulations per gen"] = g_world_size;
 	jsonLog["reevaluation size"] = reevaluation_size;
 	jsonLog["degradation timescale"] = degradation_param;
+	jsonLog["latpack path"] = latpack_path;
 	jsonLog["translation params"] = speedparams_path;
 	jsonLog["rng seed"] = rng_seed;
 	jsonLog["mutation mode"] = mutation_mode;
@@ -735,6 +782,7 @@ int main(int argc, char** argv)
     int posttranslational_folding_time;
     int total_translation_steps;
     int last_accepted_gen = 0;
+    int gen = 0;
     int n_gens_without_mutation = 0;
     int mutation_type = -1;
     double old_fitness = 0.001;
@@ -750,7 +798,7 @@ int main(int argc, char** argv)
     std::unique_ptr<char []> aa_sequence_str(new char[protein_length+1]);
 
     // Begin running simulation loop
-    for (int gen = 0; gen < n_gens; ++gen)
+    for (; gen < n_gens; ++gen)
     {
 	// Compose the simulation parameters.
 	// First determine the time allowed for posttranslational folding.
@@ -966,7 +1014,7 @@ bool makePath(const std::string& path)
 	    return false;
     }
     return 0 == mkdir(path.c_str(), mode);
-
+    ;
     case EEXIST:
         // done
         return isDirExist(path);
@@ -974,6 +1022,44 @@ bool makePath(const std::string& path)
     default:
         return false;
     }
+}
+
+
+// Load simulation checkpoint file.
+json openCheckpointFile(const std::string & checkpointPath)
+{
+    std::ifstream infile(checkpointPath);
+    json checkpoint;
+    infile >> checkpoint;
+    json rng_states = checkpoint.at("rng state");
+    std::vector<uint64_t> rng_state(4, 0);
+    rng_states[g_world_rank].get_to(rng_state);
+    set_threefry_array(rng_state[0], rng_state[1], rng_state[2], rng_state[3]);
+    return checkpoint;
+}
+
+
+// Save simulation state so that simulation can be resumed.
+void makeCheckpoint(
+    std::string& outPath,
+    json& jsonLog)
+{
+    std::string checkpointPath = outPath + "/checkpoint.json";
+    json checkpoint;
+    // things that need to be saved:
+    // generation number, random number of each processor, number of processors,
+
+    // Save RNG state
+    std::vector<uint64_t>rng_state(4, 0);
+
+
+    // All processors were working up to here
+    if (!g_world_rank)
+    {
+	std::ofstream checkpointFile(outPath);
+	checkpointFile << std::setw(2) << checkpoint << std::endl;
+    }
+    return;
 }
 
 
@@ -1051,7 +1137,7 @@ std::vector<std::string> compose_latfoldvec_command(
     }
     else
     {
-	command.push_back("-out=N");
+	command.push_back("-out=E");
     }
     
     // Previously we did the what is commented out, but we want to
