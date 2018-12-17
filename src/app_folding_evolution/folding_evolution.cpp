@@ -2,6 +2,7 @@
  * folding_evolution v0.0.4
  *
  * Monoclonal simulation
+ *
  */
 
 #include <iostream>
@@ -37,8 +38,8 @@ using json = nlohmann::json;
 // When compiling Random123 header files for rng.h, we don't need the
 //   C++ features (and they're not compatible with extern "C"), so we
 //   temporarily undefine __cplusplus, saving its value in CPLUSPLUS.
-//   Alternatively, we could build rng.o from rng.c using g++, and then
-//   we wouldn't have to wrap rng.h in extern "C".
+//   Alternatively, we could build rng.o and gencode.o using g++, and
+//   then we wouldn't have to wrap with extern "C".
 
 extern "C"
 {
@@ -115,11 +116,12 @@ static const std::string DEFAULT_LATPACK_PATH = "/n/home00/vzhao/pkg/latPack/1.9
 static const std::string DEFAULT_OUTPATH = "./out";
 static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_LATFOLD_OUTFREQ = 10000;
+static const int DEFAULT_CHECKPOINT_FREQ = 1;
 static const int DEFAULT_JSON_OUTFREQ = 5;
 static const int DEFAULT_POPULATION_SIZE = 500;
 static const int DEFAULT_MUTATION_MODE = 2;    // MutateAll default value
 static const double DEFAULT_TEMPERATURE = 0.3;
-static const double DEFAULT_REEVALUATION_RATIO = 0.5;
+static const double DEFAULT_REEVALUATION_RATIO = 0.5; // Not commandline option.
 static const double DEFAULT_FITNESS_CONSTANT = 0.75;
 static const double DEFAULT_DEGRADATION_PARAM = 1000000;
 
@@ -143,16 +145,18 @@ void print_help();
 void print_error(const std::string& message, bool debug_mode);
 
 // checks if given directory exists (From sodapop)
-bool isDirExist(const std::string& path);
+bool is_dir_exist(const std::string& path);
 
 // creates directory from specified path (from sodapop)
-bool makePath(const std::string& path);
+bool make_path(const std::string& path);
 
 // Load simulation checkpoint file.
-json openCheckpointFile(const std::string& checkpointPath);
+json open_checkpoint_file(const std::string& checkpoint_path);
 
 // Save simulation state so that simulation can be resumed.
-void makeCheckpoint();
+void write_checkpoint(
+    const std::string& checkpoint_path,
+    json& checkpoint);
 
 // Convert a vector of strings into a vector of char pointers for use
 // by execv family of commands. Adds a NULL element to the end.
@@ -290,7 +294,7 @@ void cout_state(
 
 // Save results to json log.
 void save_state(
-    json& jsonLog,
+    json& json_log,
     int generation,
     int n_gens_without_mutation,
     int mutation_type,
@@ -306,17 +310,20 @@ void save_state(
 
 // Write json file (does overwrite)
 void write_log(
-    const json& jsonLog,
-    const std::string& jsonLogPath);
+    const json& json_log,
+    const std::string& json_log_path);
 
 
+// --------------------------------------------------
+// --------------------== MAIN ==--------------------
+// --------------------------------------------------
 int main(int argc, char** argv)
 {
     // MPI init stuff
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &g_world_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &g_world_size);
-    assert (g_world_size > 1);    // We need at least two CPUs
+    assert(g_world_size > 1);    // We need at least two CPUs
 
     // Split cpus into two groups
     // world_rank [0, reevaluation_size) does reevaluation
@@ -327,6 +334,7 @@ int main(int argc, char** argv)
 	MPI_COMM_WORLD, proc_does_reevaluation, g_world_rank, &g_subcomm);
     MPI_Comm_rank(g_subcomm, &g_subcomm_rank);
     MPI_Comm_size(g_subcomm, &g_subcomm_size);
+    assert(g_subcomm_size > 1);
 
     // Variables to be determined by commandline options: 
 
@@ -337,18 +345,18 @@ int main(int argc, char** argv)
     // Other params:
     bool debug_mode = false;
     bool save_conformations = false;
-    bool resumeFromCheckpoint = false;
+    bool resume_from_checkpoint = false;
     int random_codons = 0;
     int population_size = DEFAULT_POPULATION_SIZE;
     std::string folded_conformation;
     std::string speedparams_path;
     std::string latpack_path = DEFAULT_LATPACK_PATH;
-    std::string outPath = DEFAULT_OUTPATH;
-    std::string checkpointPath;
-    std::string latSimOutPath;
-    std::string jsonLogPath;	// we're going to log using json
+    std::string out_path = DEFAULT_OUTPATH;
+    std::string checkpoint_path;
+    std::string lat_sim_out_path;
+    std::string json_log_path;	// we're going to log using json
     json checkpoint;
-    json jsonLog;
+    json json_log;
     std::ostream * outstream = &std::cout;
     double degradation_param = DEFAULT_DEGRADATION_PARAM;
     uint64_t rng_seed = DEFAULT_SEED;
@@ -364,6 +372,7 @@ int main(int argc, char** argv)
     // These particular params currently don't have
     // commandline arguments
     int latfold_output_frequency = DEFAULT_LATFOLD_OUTFREQ;
+    int checkpoint_frequency = DEFAULT_CHECKPOINT_FREQ;
 
     // Begin option handling (https://linux.die.net/man/3/getopt)
     int c, option_index = 0;
@@ -406,10 +415,10 @@ int main(int argc, char** argv)
 	    print_help();
 	    exit(0);
 	case 'f':
-	    // We are resuming from checkpoint
-	    checkpointPath = optarg;
-	    resumeFromCheckpoint = true;
-	    goto checkpointBreakout;
+	    // We are resuming from checkpoint. Ignore all other arguments
+	    checkpoint_path = optarg;
+	    resume_from_checkpoint = true;
+	    goto checkpoint_breakout;
 	case 'c':
 	    save_conformations = true;
 	    break;
@@ -418,9 +427,6 @@ int main(int argc, char** argv)
 	    break;
 	case 0:
 	    break;
-	// case 'd':
-	//     h5file_path = optarg;
-	//     break;
 	case 'k':
 	    try
 	    {
@@ -469,7 +475,7 @@ int main(int argc, char** argv)
 	    folded_conformation = optarg;
 	    break;
         case 'o':
-            outPath = optarg;
+            out_path = optarg;
             break;
 	case 'p':
 	    try
@@ -525,13 +531,14 @@ int main(int argc, char** argv)
 	    print_error(err.str(), debug_mode);
 	    exit(PARSE_ERROR);
 	}
-    checkpointBreakout:
+    checkpoint_breakout:
 	break;
     } // End while getopt_long
 
-    // Continued parsing: positional arguments
-    if (!resumeFromCheckpoint)
+    // Continued parsing || checkpoint resume
+    if (!resume_from_checkpoint)
     {
+	// Positional arguments
 	if (optind + 2 == argc)
 	{
 	    sequence = argv[optind++];
@@ -589,74 +596,122 @@ int main(int argc, char** argv)
 		      << std::endl;
 	    exit(PARSE_ERROR);
 	}
+
+	lat_sim_out_path = out_path + "/latfoldvec_simulations";
+	json_log_path = out_path + "/simulation_log.json";
+
+	checkpoint["out path"] = out_path;
+	checkpoint["lat sim path"] = lat_sim_out_path;
+	checkpoint["json log path"] = json_log_path;
+	checkpoint["sequence"] = sequence;
+
+	// Setup output directories
+	if (!g_world_rank && is_dir_exist(out_path))
+	{
+	    std::ostringstream err;
+	    err << "Error, output path exists: " << out_path << std::endl;
+	    print_error(err.str(), debug_mode);
+	    exit(IO_ERROR);
+	}
+
+	if (!g_world_rank)
+	{
+	    if (!make_path(out_path))
+	    {
+		std::ostringstream err;
+		err << "Error, could not make output path: " << out_path << std::endl;
+		print_error(err.str(), debug_mode);
+		MPI_Abort(MPI_COMM_WORLD, IO_ERROR);
+	    }
+	    if (!make_path(lat_sim_out_path))
+	    {
+		std::ostringstream err;
+		err << "Error, could not make output path: " << lat_sim_out_path
+		    << std::endl;
+		print_error(err.str(), debug_mode);
+		MPI_Abort(MPI_COMM_WORLD, IO_ERROR);
+	    }
+	}
+
+	// Wait for slow network file system
+	MPI_Barrier(MPI_COMM_WORLD);
+	while (!is_dir_exist(lat_sim_out_path))
+	{
+	    sleep(1);
+	}
+    
+	// Initialize RNG, giving different processes different seeds
+	set_threefry_array(rng_seed, g_world_rank, proc_does_reevaluation, 0);
     }
-    else
+    else			// checkpoint resume
     {
-	std::string jsonLogPath;
 	int simulations_per_gen;
-	checkpoint = openCheckpointFile(checkpointPath);
-	
-	checkpoint.at("json log path").get_to(jsonLogPath);
-	std::ifstream jsonLogFile(jsonLogPath);
-	jsonLogFile >> jsonLog;
-	jsonLog.at("folded conformation").get_to(folded_conformation);
-	jsonLog.at("generations").get_to(n_gens);
-	jsonLog.at("population size").get_to(population_size);
-	jsonLog.at("temperature").get_to(temperature);
-	jsonLog.at("simulations per gen").get_to(simulations_per_gen);
-	jsonLog.at("reevaluation size").get_to(reevaluation_size);
-	jsonLog.at("degradation timescale").get_to(degradation_param);
-	jsonLog.at("latpack path").get_to(latpack_path);
-	jsonLog.at("translation params").get_to(speedparams_path);
-	jsonLog.at("mutation mode").get_to(mutation_mode);
+	int checkpoint_reevaluation_size;
+
+	checkpoint = open_checkpoint_file(checkpoint_path);
+	checkpoint.at("out path").get_to(out_path);
+	checkpoint.at("json log path").get_to(json_log_path);
+	checkpoint.at("lat sim path").get_to(lat_sim_out_path);
+	// (The original sequence)
+	checkpoint.at("sequence").get_to(sequence);
+
+	// Access data stored in json log of simulation being resumed.
+	// This restores the simulation trajectory log and lets us
+	//   access a bunch of simulation parameters.
+	std::ifstream json_log_file(json_log_path);
+	json_log_file >> json_log;
+	json_log.at("folded conformation").get_to(folded_conformation);
+	json_log.at("generations").get_to(n_gens);
+	json_log.at("population size").get_to(population_size);
+	json_log.at("temperature").get_to(temperature);
+	json_log.at("simulations per gen").get_to(simulations_per_gen);
+	json_log.at("reevaluation size").get_to(checkpoint_reevaluation_size);
+	json_log.at("degradation timescale").get_to(degradation_param);
+	json_log.at("latpack path").get_to(latpack_path);
+	json_log.at("translation params").get_to(speedparams_path);
+	json_log.at("mutation mode").get_to(mutation_mode);
+
+	// Check that simulations_per_gen agrees with number of processors
+	if (simulations_per_gen != g_world_size)
+	{
+	    std::cerr << "Resuming from simulation checkpoint, but number "
+		      << "of CPUs currently does not match that of simulation "
+		      << "that produced the checkpoint." << std::endl;
+	    std::cerr << "Current CPU count: " << g_world_size << std::endl;
+	    std::cerr << "Checkpoint CPU count: " << simulations_per_gen
+		      << std::endl;
+	    exit(DATA_ERROR);
+	}
+	if (checkpoint_reevaluation_size != reevaluation_size)
+	{
+	    std::cerr << "Resuming from simulation checkpoint, but number "
+		      << "of CPUs to be used to reevaluate accepted "
+		      << "sequences does not match that of simulation "
+		      << "that produced the checkpoint." << std::endl;
+	    std::cerr << "Current reevaluation count: " << reevaluation_size
+		      << std::endl;
+	    std::cerr << "Checkpoint reevaluation count: "
+		      << checkpoint_reevaluation_size << std::endl;
+	    exit(DATA_ERROR);
+	}
+
+	// need to trim json log if it's too long
+	int checkpoint_generation;
+	checkpoint.at("generation").get_to(checkpoint_generation);
+	for (auto it = json_log.at("trajectory").begin();
+	     it != json_log.at("trajectory").end();
+	     ++it)
+	{
+	    if (it->at("generation") > checkpoint_generation)
+	    {
+		json_log.at("trajectory").erase(it);
+	    }
+	}
     }
     
     // End option parsing
     // --------------------------------------------------
     // Begin simulation setup
-
-    // Initialize RNG, giving different processes different seeds
-    set_threefry_array(rng_seed, g_world_rank, proc_does_reevaluation, 0);
-
-    // Setup output
-    if (!g_world_rank && isDirExist(outPath))
-    {
-	std::ostringstream err;
-	err << "Error, output path exists: " << outPath << std::endl;
-	print_error(err.str(), debug_mode);
-	exit(IO_ERROR);
-    }
-    checkpointPath = outPath + "/checkpoint.json";
-    latSimOutPath = outPath + "/latfoldvec_simulations";
-    jsonLogPath = outPath + "/simulation_log.json";
-
-    if (!g_world_rank)
-    {
-	if (!makePath(outPath))
-	{
-	    std::ostringstream err;
-	    err << "Error, could not make output path: " << outPath << std::endl;
-	    print_error(err.str(), debug_mode);
-	    MPI_Abort(MPI_COMM_WORLD, IO_ERROR);
-	}
-	if (!makePath(latSimOutPath))
-	{
-	    std::ostringstream err;
-	    err << "Error, could not make output path: " << latSimOutPath
-		<< std::endl;
-	    print_error(err.str(), debug_mode);
-	    MPI_Abort(MPI_COMM_WORLD, IO_ERROR);
-	}
-    }
-
-    // Wait for slow network file system
-    MPI_Barrier(MPI_COMM_WORLD);
-    while (!isDirExist(latSimOutPath))
-    {
-	sleep(1);
-    }
-    
-    // #^@#$^@#$%@#$% checkpoint break here?
 
     // Process the user-provided sequence
     std::vector<int> nuc_sequence;
@@ -668,68 +723,76 @@ int main(int argc, char** argv)
     unsigned int protein_length = folded_conformation.length() + 1;
     unsigned int nuc_length = protein_length * 3;
 
-    // After inferring length, resize vectors
+    // Resize vectors
     nuc_sequence.resize(nuc_length);
     prev_nuc_sequence.resize(nuc_length);
     aa_sequence.resize(protein_length);
     codon_sequence.resize(protein_length);
 
-    // We use resize because we directly access the underlying arrays of
-    // our three vectors in this next section (b/c interfacing with C code)
-    if (protein_length == sequence.length()) 
+    if (!resume_from_checkpoint)
     {
-	// presume it's a protein sequence
-	if (LetterToAASeq(
-		sequence.c_str(), aa_sequence.data(), protein_length))
+	// We use resize because we directly access the underlying arrays of
+	// our three vectors in this next section (b/c interfacing with C code)
+	if (protein_length == sequence.length()) 
 	{
+	    // Presume it's a protein sequence
+	    if (LetterToAASeq(
+		    sequence.c_str(), aa_sequence.data(), protein_length))
+	    {
+		std::ostringstream err;
+		err << "Letter to aa conversion problem" << std::endl;
+		err << "Sequence: " << sequence << std::endl;
+		print_error(err.str(), debug_mode);
+		exit(DATA_ERROR);
+	    }
+	    AASeqToNucSeq(aa_sequence.data(), nuc_sequence.data(),
+			  protein_length, random_codons);
+	}
+	else if (protein_length * 3 == sequence.length())
+	{
+	    // presume we have an rna sequence
+	    if (LetterToNucCodeSeq(
+		    sequence.c_str(), nuc_sequence.data(), nuc_length))
+	    {
+		std::ostringstream err;
+		err << "letter to nuc conversion problem" << std::endl;
+		err << "Sequence: " << sequence << std::endl;
+		print_error(err.str(), debug_mode);
+		exit(DATA_ERROR);
+	    }
+	    if (NucSeqToAASeq(
+		    nuc_sequence.data(), nuc_length, aa_sequence.data()))
+	    {
+		// nuc sequence contains a stop codon
+		std::ostringstream err;
+		err << "Provided RNA sequence contains a stop codon"
+		    << std::endl;
+		err << "Sequence: " << sequence << std::endl;
+		print_error(err.str(), debug_mode);
+		exit(DATA_ERROR);
+	    }
+	}
+	else
+	{
+	    // houston we have a problem
 	    std::ostringstream err;
-	    err << "Letter to aa conversion problem" << std::endl;
-	    err << "Sequence: " << sequence << std::endl;
+	    err << "Protein length of " << protein_length
+		<< ", inferred from conformation string," << std::endl
+		<< "is not matched by provided sequence:" << std::endl
+		<< sequence << ", l = " << sequence.length() << std::endl
+		<< "Expected length of " << protein_length << " or "
+		<< nuc_length << " (RNA sequence)" << std::endl;
 	    print_error(err.str(), debug_mode);
 	    exit(DATA_ERROR);
 	}
-	AASeqToNucSeq(aa_sequence.data(), nuc_sequence.data(),
-		      protein_length, random_codons);
     }
-    else if (protein_length * 3 == sequence.length())
+    else			// resuming from checkpoint
     {
-	// presume we have an rna sequence
-	if (LetterToNucCodeSeq(
-		sequence.c_str(), nuc_sequence.data(), nuc_length))
-	{
-	    std::ostringstream err;
-	    err << "letter to nuc conversion problem" << std::endl;
-	    err << "Sequence: " << sequence << std::endl;
-	    print_error(err.str(), debug_mode);
-	    exit(DATA_ERROR);
-	}
-	if (NucSeqToAASeq(
-		nuc_sequence.data(), nuc_length, aa_sequence.data()))
-	{
-	    // nuc sequence contains a stop codon
-	    std::ostringstream err;
-	    err << "Provided RNA sequence contains a stop codon"
-		      << std::endl;
-	    err << "Sequence: " << sequence << std::endl;
-	    print_error(err.str(), debug_mode);
-	    exit(DATA_ERROR);
-	}
-    }
-    else
-    {
-	// houston we have a problem
-	std::ostringstream err;
-	err << "Protein length of " << protein_length
-	    << ", inferred from conformation string," << std::endl
-	    << "is not matched by provided sequence:" << std::endl
-	    << sequence << ", l = " << sequence.length() << std::endl
-	    << "Expected length of " << protein_length << " or "
-	    << nuc_length << " (RNA sequence)" << std::endl;
-	print_error(err.str(), debug_mode);
-	exit(DATA_ERROR);
+	checkpoint.at("nuc sequence").get_to(nuc_sequence);
+	NucSeqToAASeq(nuc_sequence.data(), nuc_length, aa_sequence.data());
     }
 
-    // finally, obtain a codon sequence
+    // Obtain a codon sequence from nuc_sequence
     NucSeqToCodonSeq(nuc_sequence.data(), nuc_length, codon_sequence.data());
 
     // Open translation speed data file and read
@@ -748,20 +811,22 @@ int main(int argc, char** argv)
     // It's time to give the people some information
     if (!g_world_rank)
     {
-	// json
-	jsonLog["sequence"] = sequence;
-	jsonLog["folded conformation"] = folded_conformation;
-	jsonLog["generations"] = n_gens;
-	jsonLog["population size"] = population_size;
-	jsonLog["temperature"] = temperature;
-	jsonLog["simulations per gen"] = g_world_size;
-	jsonLog["reevaluation size"] = reevaluation_size;
-	jsonLog["degradation timescale"] = degradation_param;
-	jsonLog["latpack path"] = latpack_path;
-	jsonLog["translation params"] = speedparams_path;
-	jsonLog["rng seed"] = rng_seed;
-	jsonLog["mutation mode"] = mutation_mode;
-	jsonLog["trajectory"] = json::array();
+	if (!resume_from_checkpoint)
+	{
+	    json_log["sequence"] = sequence;
+	    json_log["folded conformation"] = folded_conformation;
+	    json_log["generations"] = n_gens;
+	    json_log["population size"] = population_size;
+	    json_log["temperature"] = temperature;
+	    json_log["simulations per gen"] = g_world_size;
+	    json_log["reevaluation size"] = reevaluation_size;
+	    json_log["degradation timescale"] = degradation_param;
+	    json_log["latpack path"] = latpack_path;
+	    json_log["translation params"] = speedparams_path;
+	    json_log["rng seed"] = rng_seed;
+	    json_log["mutation mode"] = mutation_mode;
+	    json_log["trajectory"] = json::array();
+	}
 	// printing
 	*outstream
 	    << "# folding_evolution" << std::endl
@@ -779,10 +844,15 @@ int main(int argc, char** argv)
     }
     
     // Simulation-related variables and parameters
-    int posttranslational_folding_time;
+    // First determine the time allowed for posttranslational folding.
+    // The probability of posttranslation degradation is 1 - exp(-kt)
+    // where k = degradation_param and t = time since translation (ribosome release)
+    // Set it to be log(8) / k. (87.5% probability of degradation).
+    int posttranslational_folding_time = log(8) * degradation_param;
+    int gen = 0;
+    int old_total_translation_steps;
     int total_translation_steps;
     int last_accepted_gen = 0;
-    int gen = 0;
     int n_gens_without_mutation = 0;
     int mutation_type = -1;
     double old_fitness = 0.001;
@@ -797,15 +867,25 @@ int main(int argc, char** argv)
     std::vector<std::string> prev_latfoldvec_command;
     std::unique_ptr<char []> aa_sequence_str(new char[protein_length+1]);
 
+    if (!resume_from_checkpoint)
+    {
+	checkpoint.at("generation").get_to(gen);
+	checkpoint.at("old total translation steps").get_to(
+	    old_total_translation_steps);
+	checkpoint.at("last accepted gen").get_to(last_accepted_gen);
+	checkpoint.at("n gens without mutation").get_to(
+	    n_gens_without_mutation);
+	checkpoint.at("mutation type").get_to(mutation_type);
+	checkpoint.at("old fitness").get_to(old_fitness);
+	checkpoint.at("old folded fraction").get_to(old_folded_fraction);
+	checkpoint.at("prev latfoldvec command").get_to(
+	    prev_latfoldvec_command);
+    }
+
     // Begin running simulation loop
     for (; gen < n_gens; ++gen)
     {
 	// Compose the simulation parameters.
-	// First determine the time allowed for posttranslational folding.
-	// The probability of posttranslation degradation is 1 - exp(-kt)
-	// where k = degradation_param and t = time since translation (ribosome release)
-	// Set it to be log(8) / k. (87.5% probability of degradation).
-	posttranslational_folding_time = log(8) * degradation_param;
 	translation_schedule = make_translation_schedule(
 	    translation_times, codon_sequence, stop_codon_times[0],
 	    &total_translation_steps);
@@ -825,7 +905,7 @@ int main(int argc, char** argv)
 	{
 	    std::ostringstream output_dir;
 	    std::ostringstream hdf5_output_file;
-	    output_dir << latSimOutPath << "/gen" << std::setw(5)
+	    output_dir << lat_sim_out_path << "/gen" << std::setw(5)
 		       << std::setfill('0') << last_accepted_gen;
 	    hdf5_output_file << output_dir.str() << "/sim" << std::setfill('0')
 			     << std::setw(5) << n_gens_without_mutation + 1
@@ -833,7 +913,7 @@ int main(int argc, char** argv)
 
 	    run_latfoldvec(prev_latfoldvec_command, hdf5_output_file.str());
 	    folded_fraction = evaluate_folded_fraction(
-		hdf5_output_file.str(), total_translation_steps,
+		hdf5_output_file.str(), old_total_translation_steps,
 		degradation_param, &native_energy);
 
 	    // Now update old fitness
@@ -843,15 +923,15 @@ int main(int argc, char** argv)
 	    old_fitness = calculate_fitness(old_folded_fraction);
 	}
 	else if (!proc_does_reevaluation)
-	{
+ {
 	    std::ostringstream output_dir;
 	    std::ostringstream hdf5_output_file;
-	    output_dir << latSimOutPath << "/gen" << std::setw(5)
+	    output_dir << lat_sim_out_path << "/gen" << std::setw(5)
 		       << std::setfill('0') << std::to_string(gen);
 
 	    if (!g_subcomm_rank)
 	    {
-		if (!makePath(output_dir.str()))
+		if (!make_path(output_dir.str()))
 		{
 		    std::cerr << "Error making dir: " << output_dir.str()
 			      << std::endl;
@@ -861,7 +941,7 @@ int main(int argc, char** argv)
 
             // wait for mkdir
 	    MPI_Barrier(g_subcomm); 
-	    while (!isDirExist(output_dir.str()))
+	    while (!is_dir_exist(output_dir.str()))
 	    {
 		sleep(1);
 	    }
@@ -902,13 +982,13 @@ int main(int argc, char** argv)
 	    // Output information
 	    cout_state(outstream, gen, aa_sequence, nuc_sequence, old_fitness,
 		       fitness, native_energy, accept);
-	    save_state(jsonLog, gen, n_gens_without_mutation, mutation_type,
+	    save_state(json_log, gen, n_gens_without_mutation, mutation_type,
 		       aa_sequence, nuc_sequence, old_fitness, fitness,
 		       old_folded_fraction, folded_fraction, native_energy,
 		       (bool)accept);
 	    if (gen % DEFAULT_JSON_OUTFREQ == 0)
 	    {
-		write_log(jsonLog, jsonLogPath);
+		write_log(json_log, json_log_path);
 	    }
 	}
 
@@ -921,6 +1001,7 @@ int main(int argc, char** argv)
 	    // Update so that nuc_sequence and fitness are fixed
 	    prev_nuc_sequence = nuc_sequence;
 	    prev_latfoldvec_command = latfoldvec_command;
+	    old_total_translation_steps = total_translation_steps;
 	    old_folded_fraction = folded_fraction;
 	    old_fitness = fitness;
 	    n_gens_without_mutation = 0;
@@ -956,10 +1037,33 @@ int main(int argc, char** argv)
 	// and update sequences
 	NucSeqToCodonSeq(nuc_sequence.data(), nuc_length, codon_sequence.data());
 	NucSeqToAASeq(nuc_sequence.data(), nuc_length, aa_sequence.data());
+
+	// Need to save checkpoint
+	if (gen % checkpoint_frequency == 0)
+	{
+	    std::ostringstream checkpoint_path;
+	    checkpoint_path << out_path << "/checkpoint"<< std::setw(5)
+			   << std::setfill('0') << std::to_string(gen)
+			   << ".json";
+
+	    checkpoint["generation"] = gen;
+	    checkpoint["nuc sequence"] = nuc_sequence;
+	    checkpoint["old total translation steps"] =
+		old_total_translation_steps;
+	    checkpoint["last accepted gen"] = last_accepted_gen;
+	    checkpoint["n gens without mutation"] =
+		n_gens_without_mutation;
+	    checkpoint["mutation type"] = mutation_type;
+	    checkpoint["old fitness"] = old_fitness;
+	    checkpoint["old folded fraction"]
+		= old_folded_fraction;
+	    checkpoint["prev latfoldvec command"] = prev_latfoldvec_command;
+	    write_checkpoint(checkpoint_path.str(), checkpoint);
+	}
     }
 
     // finalize json log
-    write_log(jsonLog, jsonLogPath);
+    write_log(json_log, json_log_path);
     
     MPI_Comm_free(&g_subcomm);
     MPI_Finalize();
@@ -984,7 +1088,7 @@ void print_error(const std::string& message, bool debug_mode)
 }
 
 // checks if given directory exists
-bool isDirExist(const std::string& path)
+bool is_dir_exist(const std::string& path)
 {
     struct stat info;
     if (stat(path.c_str(), &info) != 0)
@@ -994,7 +1098,7 @@ bool isDirExist(const std::string& path)
 
 
 // creates directory from specified path
-bool makePath(const std::string& path)
+bool make_path(const std::string& path)
 {
     mode_t mode = 0755;
     int ret = mkdir(path.c_str(), mode);
@@ -1010,14 +1114,14 @@ bool makePath(const std::string& path)
 	std::size_t pos = path.find_last_of('/');
 	if (pos == std::string::npos)
 	    return false;
-	if (!makePath( path.substr(0, pos)))
+	if (!make_path( path.substr(0, pos)))
 	    return false;
     }
     return 0 == mkdir(path.c_str(), mode);
     ;
     case EEXIST:
         // done
-        return isDirExist(path);
+        return is_dir_exist(path);
 
     default:
         return false;
@@ -1026,37 +1130,55 @@ bool makePath(const std::string& path)
 
 
 // Load simulation checkpoint file.
-json openCheckpointFile(const std::string & checkpointPath)
+json open_checkpoint_file(const std::string & checkpoint_path)
 {
-    std::ifstream infile(checkpointPath);
+    std::ifstream infile(checkpoint_path);
     json checkpoint;
     infile >> checkpoint;
+
+    // Load RNG state.
     json rng_states = checkpoint.at("rng state");
-    std::vector<uint64_t> rng_state(4, 0);
+    std::vector<uint64_t> rng_state;
     rng_states[g_world_rank].get_to(rng_state);
     set_threefry_array(rng_state[0], rng_state[1], rng_state[2], rng_state[3]);
+
     return checkpoint;
 }
 
 
 // Save simulation state so that simulation can be resumed.
-void makeCheckpoint(
-    std::string& outPath,
-    json& jsonLog)
+void write_checkpoint(
+    const std::string& checkpoint_path,
+    json& checkpoint)
 {
-    std::string checkpointPath = outPath + "/checkpoint.json";
-    json checkpoint;
     // things that need to be saved:
     // generation number, random number of each processor, number of processors,
 
     // Save RNG state
-    std::vector<uint64_t>rng_state(4, 0);
+    checkpoint["rng state"] = json::array();
+    std::vector<uint64_t> rng_state(4, 0);
+    get_rng_state(rng_state.data());
+    if (g_world_rank)
+    {
+	// mpi send
+	MPI_Send(rng_state.data(), 4, MPI_UINT64_T, 0, 0, MPI_COMM_WORLD);
+    }
+    else
+    {
+	checkpoint["rng state"].push_back(rng_state);
+	// mpi recv
+	for (int i=1; i<g_world_size; ++i)
+	{
+	    MPI_Recv(rng_state.data(), 4, MPI_UINT64_T, i, 0, MPI_COMM_WORLD,
+		&g_status);
+	    checkpoint["rng state"].push_back(rng_state);	    
+	}
+    }
 
-
-    // All processors were working up to here
+    // Save from root.
     if (!g_world_rank)
     {
-	std::ofstream checkpointFile(outPath);
+	std::ofstream checkpointFile(checkpoint_path);
 	checkpointFile << std::setw(2) << checkpoint << std::endl;
     }
     return;
@@ -1474,7 +1596,7 @@ void cout_state(
 
 // Save results to json log.
 void save_state(
-    json& jsonLog,
+    json& json_log,
     int generation,
     int n_gens_without_mutation,
     int mutation_type,
@@ -1495,9 +1617,9 @@ void save_state(
     PrintNucCodeSequence(nuc_seq_str.get(), nuc_sequence.data(), nuc_seq_len);
     
     int n_evaluations =
-	n_gens_without_mutation * (int)jsonLog["reevaluation size"]
-	+ ((int)jsonLog["simulations per gen"]
-	   - (int)jsonLog["reevaluation size"]);
+	n_gens_without_mutation * (int)json_log["reevaluation size"]
+	+ ((int)json_log["simulations per gen"]
+	   - (int)json_log["reevaluation size"]);
 
     json entry;
     entry["generation"] = generation;
@@ -1511,26 +1633,26 @@ void save_state(
     entry["new folded fraction"] = new_folded_fraction;
     entry["native energy"] = native_energy;
     entry["accepted"] = accept;
-    jsonLog["trajectory"].push_back(entry);
+    json_log["trajectory"].push_back(entry);
     return;
 }
 
 
 // Write json file (does overwrite)
 void write_log(
-    const json& jsonLog,
-    const std::string& jsonLogPath)
+    const json& json_log,
+    const std::string& json_log_path)
 {
     if (!g_world_rank)
     {
-	std::fstream out(jsonLogPath, std::ios::out | std::ios::trunc);
+	std::fstream out(json_log_path, std::ios::out | std::ios::trunc);
 	if (!out.is_open())
 	{
 	    std::cerr << "Output file could not be opened";
 	    exit(1);
 	}
 
-	out << std::setw(2) << jsonLog << std::endl;
+	out << std::setw(2) << json_log << std::endl;
 	out.close();
     }
     return;
