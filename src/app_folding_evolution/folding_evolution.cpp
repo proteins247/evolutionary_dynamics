@@ -211,7 +211,7 @@ std::vector<std::string> compose_latfoldvec_command(
 //        by compose_latfoldvec_command.
 // @param outfile latFoldVec program output will go to this file.
 void run_latfoldvec(
-    std::vector<std::string> & latfoldvec_command,
+    std::vector<std::string> latfoldvec_command,
     const std::string & outfile);
 
 
@@ -1282,7 +1282,7 @@ std::vector<std::string> compose_latfoldvec_command(
 // Use fork and exec to run a latFoldVec co-translational folding
 // simulation.
 void run_latfoldvec(
-    std::vector<std::string> & latfoldvec_command,
+    std::vector<std::string> latfoldvec_command,
     const std::string & outfile)
 {
     // Add additional parameters
