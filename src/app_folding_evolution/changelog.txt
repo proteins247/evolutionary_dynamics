@@ -1,0 +1,12 @@
+# Changelog for folding_evolution
+
+## [0.0.3] - 2018-11-12
+### Changed
+- More data in JSON-format simulation log
+### Added
+- Intermediate saves of simulation log
+- Attempts to wait for file directory creation
+
+## [0.0.2] - 2018-10-27
+### Added
+- JSON-format simulation log
