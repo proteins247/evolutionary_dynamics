@@ -2,6 +2,8 @@
  * folding_evolution v0.0.4
  *
  * Monoclonal simulation
+ * in current testing, this is not running
+ * because of argument parsing problems. weird
  *
  */
 
@@ -52,6 +54,7 @@ extern "C"
 
 
 static const std::string helptext =
+    "HELP:\n"
     "folding_evolution\n"
     "Requires latPack and MPI\n"
     "\n"
@@ -334,7 +337,7 @@ int main(int argc, char** argv)
 	MPI_COMM_WORLD, proc_does_reevaluation, g_world_rank, &g_subcomm);
     MPI_Comm_rank(g_subcomm, &g_subcomm_rank);
     MPI_Comm_size(g_subcomm, &g_subcomm_size);
-    assert(g_subcomm_size > 1);
+    assert(g_subcomm_size > 0);
 
     // Variables to be determined by commandline options: 
 
@@ -531,6 +534,7 @@ int main(int argc, char** argv)
 	    print_error(err.str(), debug_mode);
 	    exit(PARSE_ERROR);
 	}
+	continue;
     checkpoint_breakout:
 	break;
     } // End while getopt_long
@@ -580,6 +584,7 @@ int main(int argc, char** argv)
 	    for (int i =0; i<argc; ++i)
 		err << argv[i] << " ";
 	    err << std::endl;
+	    err << "optind value: " << optind << std::endl;
 	    print_error(err.str(), debug_mode);
 	    print_help();
 	    exit(PARSE_ERROR);
@@ -870,7 +875,7 @@ int main(int argc, char** argv)
     std::vector<std::string> prev_latfoldvec_command;
     std::unique_ptr<char []> aa_sequence_str(new char[protein_length+1]);
 
-    if (!resume_from_checkpoint)
+    if (resume_from_checkpoint)
     {
 	checkpoint.at("generation").get_to(gen);
 	checkpoint.at("old total translation steps").get_to(
