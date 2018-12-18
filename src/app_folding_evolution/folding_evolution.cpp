@@ -577,6 +577,9 @@ int main(int argc, char** argv)
 	    std::ostringstream err;
 	    err << "Expected two positional arguments: SEQUENCE NROUNDS"
 		<< std::endl;
+	    for (int i =0; i<argc; ++i)
+		err << argv[i] << " ";
+	    err << std::endl;
 	    print_error(err.str(), debug_mode);
 	    print_help();
 	    exit(PARSE_ERROR);
@@ -652,7 +655,7 @@ int main(int argc, char** argv)
 	checkpoint.at("out path").get_to(out_path);
 	checkpoint.at("json log path").get_to(json_log_path);
 	checkpoint.at("lat sim path").get_to(lat_sim_out_path);
-	// (The original sequence)
+	// The original sequence
 	checkpoint.at("sequence").get_to(sequence);
 
 	// Access data stored in json log of simulation being resumed.
