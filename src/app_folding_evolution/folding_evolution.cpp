@@ -1463,8 +1463,6 @@ double evaluate_folded_fraction(
 	    -posttranslation_time / degradation_param);
 	if (threefryrand() > degradation_probability)
 	{
-	    std::cout << "folded, degradation probability: "
-		      << degradation_probability << std::endl;
 	    folded = 1;
 	}
     }
