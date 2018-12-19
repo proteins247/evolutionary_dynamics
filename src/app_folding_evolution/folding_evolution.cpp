@@ -74,7 +74,7 @@ static const std::string helptext =
     "                            as a latPack-style move sequence.\n"
     "  -s, --speed-params=FILE   REQUIRED. Path to file with translation\n"
     "                            times of the codons.\n"
-    "  -c, --save-conformation   Save latFoldVec simulation conformations.\n"
+    "  -c, --save-conformations  Save latFoldVec simulation conformations.\n"
     "  -d, --debug               Allow error messages from all processors.\n"
     "  -f, --from-checkpoint     Resume simulation from checkpoint file.\n"
     "  -k, --degradation-param=K Value setting timescale for unfolded protein\n"
@@ -99,11 +99,7 @@ static const std::string helptext =
     "Format of the output files:\n"
     "\nThe primary output is a simulation log that records the generation\n"
     "number, protein sequence, nucleic acid sequence, fitness, and whether\n"
-    "the mutation was accepted.\n"
-    "\n"
-    "In addition, it's recommended that --h5file-path be set so that\n"
-    "trajectory files go into a single directory. (The default behavior will\n"
-    "put files into the user's current directory.)\n"
+    "the mutation was accepted. Trajectory files are also saved.\n"
     "\n"
     ;
 
@@ -115,7 +111,8 @@ static const int LATPACK_ERROR = 4;
 
 // default values
 static const int GENS_MAX = 99999;
-static const std::string DEFAULT_LATPACK_PATH = "/n/home00/vzhao/pkg/latPack/1.9.1-8/";
+static const std::string DEFAULT_LATPACK_PATH =
+    "/n/home00/vzhao/pkg/latPack/1.9.1-8/";
 static const std::string DEFAULT_OUTPATH = "./out";
 static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_LATFOLD_OUTFREQ = 10000;
@@ -402,7 +399,7 @@ int main(int argc, char** argv)
 	{"seed", required_argument, NULL, 'r'},
 	{"speed-params", required_argument, NULL, 's'},
 	{"temperature", required_argument, NULL, 't'},
-	{"save-conformation", no_argument, NULL, 'c'},
+	{"save-conformations", no_argument, NULL, 'c'},
 	{"debug", no_argument, NULL, 'd'},
 	{"help", no_argument, NULL, 'h'},
 	{NULL, 0, NULL, 0}
@@ -853,9 +850,10 @@ int main(int argc, char** argv)
     
     // Simulation-related variables and parameters
     // First determine the time allowed for posttranslational folding.
-    // The probability of posttranslation degradation is 1 - exp(-kt)
-    // where k = degradation_param and t = time since translation (ribosome release)
-    // Set it to be log(8) / k. (87.5% probability of degradation).
+    // The probability of posttranslation degradation is 1 - exp(-t/tau)
+    // where tau = degradation_param and t = time since translation
+    // (ribosome release).
+    // Set it to be log(8) * tau. (87.5% probability of degradation).
     int posttranslational_folding_time = log(8) * degradation_param;
     int gen = 0;
     int old_total_translation_steps;
@@ -1464,7 +1462,11 @@ double evaluate_folded_fraction(
 	double degradation_probability = 1 - exp(
 	    -posttranslation_time / degradation_param);
 	if (threefryrand() > degradation_probability)
+	{
+	    std::cout << "folded, degradation probability: "
+		      << degradation_probability << std::endl;
 	    folded = 1;
+	}
     }
     else
     {
