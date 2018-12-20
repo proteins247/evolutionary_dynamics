@@ -1498,7 +1498,7 @@ double evaluate_folded_fraction(
 	std::cout << "steps, time, probability"
 		  << posttranslation_steps << " "
 		  << posttranslation_time << " "
-		  << degradation_probabiltiy << " "
+		  << degradation_probabilty << " "
 		  << std::endl;
 	if (threefryrand() > degradation_probability)
 	{
