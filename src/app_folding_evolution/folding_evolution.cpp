@@ -1489,8 +1489,10 @@ double evaluate_folded_fraction(
     H5Aread(last_energy_attr, H5T_NATIVE_DOUBLE, &last_energy);
     H5Aread(last_step_attr, H5T_NATIVE_UINT, &last_step);
 
+    std::cout << "evaluating, " << std::endl;
     if (std::strncmp(found_final, "yes", 3) == 0)
     {
+	std::cout << "strncmp yes found" << std::endl;
 	int posttranslation_steps = last_step - total_translation_steps;
 	double posttranslation_time = posttranslation_steps / protein_length;
 	double degradation_probability = 1 - exp(
@@ -1502,6 +1504,7 @@ double evaluate_folded_fraction(
     }
     else
     {
+	std::cout << "strncmp yes not found" << std::endl;
 	last_energy = 0;
     }
 	
