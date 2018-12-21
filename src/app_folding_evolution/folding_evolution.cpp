@@ -1492,17 +1492,25 @@ double evaluate_folded_fraction(
     if (std::strncmp(found_final, "yes", 3) == 0)
     {
 	int posttranslation_steps = last_step - total_translation_steps;
-	double posttranslation_time = posttranslation_steps / protein_length;
-	double degradation_probability = 1 - exp(
-	    -posttranslation_time / degradation_param);
-	std::cout << "steps, time, probability"
-		  << posttranslation_steps << " "
-		  << posttranslation_time << " "
-		  << degradation_probability << " "
-		  << std::endl;
-	if (threefryrand() > degradation_probability)
+	if (posttranslation_steps < 0)
 	{
 	    folded = 1;
+	}
+	else
+	{
+	    double posttranslation_time =
+		posttranslation_steps / protein_length;
+	    double degradation_probability = 1 - exp(
+		-posttranslation_time / degradation_param);
+	    std::cout << "steps, time, probability"
+		      << posttranslation_steps << " "
+		      << posttranslation_time << " "
+		      << degradation_probability << " "
+		      << std::endl;
+	    if (threefryrand() > degradation_probability)
+	    {
+		folded = 1;
+	    }
 	}
     }
     else
