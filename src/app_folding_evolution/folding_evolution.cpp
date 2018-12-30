@@ -21,6 +21,7 @@
 
 #include <getopt.h>
 #include <unistd.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/types.h>
