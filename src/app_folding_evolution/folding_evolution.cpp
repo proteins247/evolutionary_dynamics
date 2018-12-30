@@ -1,9 +1,8 @@
 /* 
  * folding_evolution v0.0.4
  *
- * Monoclonal simulation
- * in current testing, this is not running
- * because of argument parsing problems. weird
+ * v0.0.4 implements checkpointing
+ * 
  *
  */
 
@@ -68,7 +67,7 @@ static const std::string helptext =
     "Folding simulations are used to evaluate the fitness of a a genetic\n"
     "sequence. Because such a fitness measurement is noisy, sequences may\n"
     "show fitnesses higher or lower than the actual values. Hence with each\n"
-    "generation, the previous sequence is also reevaluated.\n"
+    "generation, the current sequence is also reevaluated.\n"
     "\n"
     "  -n, --native-fold=CONF    REQUIRED. The native conformation of the\n"
     "                            as a latPack-style move sequence.\n"
@@ -112,7 +111,7 @@ static const int LATPACK_ERROR = 4;
 // default values
 static const int GENS_MAX = 99999;
 static const std::string DEFAULT_LATPACK_PATH =
-    "/n/home00/vzhao/pkg/latPack/1.9.1-8/";
+    "/n/home00/vzhao/pkg/latPack/1.9.1-9/";
 static const std::string DEFAULT_OUTPATH = "./out";
 static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_LATFOLD_OUTFREQ = 10000;
@@ -144,10 +143,10 @@ void print_help();
 // Print error message to rank 0
 void print_error(const std::string& message, bool debug_mode);
 
-// checks if given directory exists (From sodapop)
+// Check if given directory exists (From sodapop)
 bool is_dir_exist(const std::string& path);
 
-// creates directory from specified path (from sodapop)
+// Create directory from specified path (from sodapop)
 bool make_path(const std::string& path);
 
 // Load simulation checkpoint file.
@@ -173,8 +172,8 @@ std::vector<char *> string_vec_to_cstring_vec(
 // 
 // @param times Codon to translation time dictionary
 // @param codon_sequence The sequence of codons
-// @param final_time The last number to put in the string (steps to simulate
-//        following translation)
+// @param final_time The last number to put in the string (representing
+//        time to release from ribosome)
 // @param total_translation_steps This function places the number of
 //        steps translation will take into this variable.
 // 
@@ -201,7 +200,7 @@ std::vector<std::string> compose_latfoldvec_command(
     bool save_conformations);
 
 
-// Use fork and exec to run a latFoldVec co-translational folding
+// Use vfork and exec to run a latFoldVec co-translational folding
 // simulation.
 //
 // @param latfoldvec_command The vector of strings built
@@ -271,17 +270,15 @@ double reaverage_folded_fraction(
     int n_gens_without_mutation);
 
 
-// Print the header for state output
-// we would want
-void cout_header(
+// Print the header for simulation text log.
+void print_header(
     std::ostream * outstream,
     const std::vector<AminoAcid> & aa_sequence,
     const std::vector<int> & nuc_sequence);
 
 
-// Print out what happened.
-// todo is to handle sequence reevaluation
-void cout_state(
+// Print out current state.
+void print_state(
     std::ostream * outstream,
     int generation,
     std::vector<AminoAcid> & aa_sequence,
@@ -292,7 +289,7 @@ void cout_state(
     bool accept);
 
 
-// Save results to json log.
+// Save current state to json log.
 void save_state(
     json& json_log,
     int generation,
@@ -308,7 +305,7 @@ void save_state(
     bool accept);
 
 
-// Write json file (does overwrite)
+// Write json file.
 void write_log(
     const json& json_log,
     const std::string& json_log_path);
@@ -549,8 +546,8 @@ int main(int argc, char** argv)
 		if (n_gens > GENS_MAX)
 		{
 		    std::ostringstream err;
-		    err << "Provided N_GENS argument" << n_gens
-			<< "cannot exeed " << GENS_MAX << std::endl;
+		    err << "Provided N_GENS argument " << n_gens
+			<< " cannot exceed " << GENS_MAX << std::endl;
 		    print_error(err.str(), debug_mode);
 		    exit(PARSE_ERROR);
 		}
@@ -845,7 +842,7 @@ int main(int argc, char** argv)
 	    << "# rng seed : " << rng_seed << std::endl
 	    << "# translation params : " << speedparams_path << std::endl
 	    ;
-	cout_header(outstream, aa_sequence, nuc_sequence); 
+	print_header(outstream, aa_sequence, nuc_sequence); 
     }
     
     // Simulation-related variables and parameters
@@ -876,6 +873,7 @@ int main(int argc, char** argv)
     if (resume_from_checkpoint)
     {
 	checkpoint.at("generation").get_to(gen);
+	++gen;
 	checkpoint.at("old total translation steps").get_to(
 	    old_total_translation_steps);
 	checkpoint.at("last accepted gen").get_to(last_accepted_gen);
@@ -986,8 +984,8 @@ int main(int argc, char** argv)
 		accept = false;
 
 	    // Output information
-	    cout_state(outstream, gen, aa_sequence, nuc_sequence, old_fitness,
-		       fitness, native_energy, accept);
+	    print_state(outstream, gen, aa_sequence, nuc_sequence, old_fitness,
+			fitness, native_energy, accept);
 	    save_state(json_log, gen, n_gens_without_mutation, mutation_type,
 		       aa_sequence, nuc_sequence, old_fitness, fitness,
 		       old_folded_fraction, folded_fraction, native_energy,
@@ -1160,6 +1158,41 @@ json open_checkpoint_file(const std::string & checkpoint_path)
 			 rng_counter[2], rng_counter[3]);
     set_threefry_result(rng_result[0], rng_result[1],
 			rng_result[2], rng_result[3], rng_index);
+
+
+    // Delete leftover files:
+    if (!g_world_rank)
+    {
+	int checkpoint_gen;
+	int reevaluation_size;
+	std::string lat_sim_out_path;
+	checkpoint.at("generation").get_to(checkpoint_gen);
+	checkpoint.at("lat sim path").get_to(lat_sim_out_path);
+    
+	// Delete generations after checkpoint:
+	std::string pathway_base(lat_sim_out_path + "/gen");
+	std::ostringstream pathname;
+	int gen = last_accepted_gen + 1;
+	while (true)
+	{
+	    pathname << lat_sim_out_path + "/gen" << std::setw(5)
+		     << std::setfill('0') << std::to_string(gen);
+	    if (access(pathname.str().c_str(), F_OK) != -1)
+	    {
+		if (remove(pathame.str().c_str()) == -1)
+		{
+		    std::cerr << "error removing: "
+			      << pathname.str();
+		}
+	    }
+	    else
+	    {
+		break;
+	    }
+	    gen++;
+	}
+    }
+
     return checkpoint;
 }
 
@@ -1502,11 +1535,6 @@ double evaluate_folded_fraction(
 		posttranslation_steps / protein_length;
 	    double degradation_probability = 1 - exp(
 		-posttranslation_time / degradation_param);
-	    std::cout << "steps, time, probability"
-		      << posttranslation_steps << " "
-		      << posttranslation_time << " "
-		      << degradation_probability << " "
-		      << std::endl;
 	    if (threefryrand() > degradation_probability)
 	    {
 		folded = 1;
@@ -1581,7 +1609,7 @@ double reaverage_folded_fraction(
 
 
 // Print the header for state output
-void cout_header(
+void print_header(
     std::ostream * outstream,
     const std::vector<AminoAcid> & aa_sequence,
     const std::vector<int> & nuc_sequence)
@@ -1618,7 +1646,7 @@ void cout_header(
 
 
 // Print out what happened.
-void cout_state(
+void print_state(
     std::ostream * outstream,
     int generation,
     std::vector<AminoAcid> & aa_sequence,
