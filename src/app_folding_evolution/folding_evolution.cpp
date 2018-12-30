@@ -1164,7 +1164,6 @@ json open_checkpoint_file(const std::string & checkpoint_path)
     if (!g_world_rank)
     {
 	int checkpoint_gen;
-	int reevaluation_size;
 	std::string lat_sim_out_path;
 	checkpoint.at("generation").get_to(checkpoint_gen);
 	checkpoint.at("lat sim path").get_to(lat_sim_out_path);
@@ -1172,14 +1171,14 @@ json open_checkpoint_file(const std::string & checkpoint_path)
 	// Delete generations after checkpoint:
 	std::string pathway_base(lat_sim_out_path + "/gen");
 	std::ostringstream pathname;
-	int gen = last_accepted_gen + 1;
+	int gen = checkpoint_gen + 1;
 	while (true)
 	{
 	    pathname << lat_sim_out_path + "/gen" << std::setw(5)
 		     << std::setfill('0') << std::to_string(gen);
 	    if (access(pathname.str().c_str(), F_OK) != -1)
 	    {
-		if (remove(pathame.str().c_str()) == -1)
+		if (remove(pathname.str().c_str()) == -1)
 		{
 		    std::cerr << "error removing: "
 			      << pathname.str();
