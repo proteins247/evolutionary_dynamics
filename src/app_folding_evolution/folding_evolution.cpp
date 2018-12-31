@@ -708,7 +708,7 @@ int main(int argc, char** argv)
 	checkpoint.at("generation").get_to(checkpoint_generation);
 	auto it = json_log.at("trajectory").begin();
 	while (it != json_log.at("trajectory").end() &&
-	       it->at("generation") < checkpoint_generation)
+	       it->at("generation") <= checkpoint_generation)
 	{
 	    ++it;
 	}
@@ -921,6 +921,10 @@ int main(int argc, char** argv)
 	    temperature,
 	    latfold_output_frequency,
 	    save_conformations);
+
+	std::cout << "RNG STATE; GEN " << gen << std::endl;
+	std::string rankname("Rank " + std::to_string(g_world_rank));
+	printf_counter(rankname.c_str());
 
 	if (proc_does_reevaluation && gen > 0)
 	{

@@ -92,7 +92,7 @@ uint64_t threefryrand_int()
     return result.v[randomNumberIndex++];
 }
 
-void printf_counter(char * prefix)
+void printf_counter(const char * prefix)
 {
     if (prefix)
     {
