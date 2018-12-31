@@ -1225,6 +1225,7 @@ json open_checkpoint_file(const std::string & checkpoint_path)
 	    {
 		break;
 	    }
+	    pathname.str("");
 	    gen++;
 	}
     }
