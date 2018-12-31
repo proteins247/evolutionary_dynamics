@@ -796,6 +796,7 @@ int main(int argc, char** argv)
     }
     else			// resuming from checkpoint
     {
+	nuc_sequence.clear();
 	checkpoint.at("nuc sequence").get_to(nuc_sequence);
 	NucSeqToAASeq(nuc_sequence.data(), nuc_length, aa_sequence.data());
     }
