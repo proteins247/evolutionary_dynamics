@@ -706,15 +706,23 @@ int main(int argc, char** argv)
 	// need to trim json log if it's too long
 	int checkpoint_generation;
 	checkpoint.at("generation").get_to(checkpoint_generation);
-	for (auto it = json_log.at("trajectory").begin();
-	     it != json_log.at("trajectory").end();
-	     ++it)
+	auto it = json_log.at("trajectory").begin();
+	while (it != json_log.at("trajectory").end() &&
+	       it->at("generation") < checkpoint_generation)
 	{
-	    if (it->at("generation") > checkpoint_generation)
-	    {
-		json_log.at("trajectory").erase(it);
-	    }
+	    ++it;
 	}
+	json_log.at("trajectory").erase(it, json_log.at("trajectory").end());
+
+	// for (auto it = json_log.at("trajectory").begin();
+	//      it != json_log.at("trajectory").end();
+	//      ++it)
+	// {
+	//     if (it->at("generation") > checkpoint_generation)
+	//     {
+	// 	json_log.at("trajectory").erase(it);
+	//     }
+	// }
     }
     
     // End option parsing
