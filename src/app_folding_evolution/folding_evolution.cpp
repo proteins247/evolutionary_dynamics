@@ -116,7 +116,7 @@ static const std::string DEFAULT_LATPACK_PATH =
 static const std::string DEFAULT_OUTPATH = "./out";
 static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_LATFOLD_OUTFREQ = 10000;
-static const int DEFAULT_CHECKPOINT_FREQ = 1;
+static const int DEFAULT_CHECKPOINT_FREQ = 20;
 static const int DEFAULT_JSON_OUTFREQ = 5;
 static const int DEFAULT_POPULATION_SIZE = 500;
 static const int DEFAULT_MUTATION_MODE = 2;    // MutateAll default value
@@ -921,13 +921,6 @@ int main(int argc, char** argv)
 	    temperature,
 	    latfold_output_frequency,
 	    save_conformations);
-
-	// Diagnostic statements
-	if (!g_world_rank)
-	    std::cout << "RNG STATE; GEN " << gen << std::endl;
-	MPI_Barrier(MPI_COMM_WORLD);
-	std::string rankname("Rank " + std::to_string(g_world_rank));
-	printf_counter(rankname.c_str());
 
 	if (proc_does_reevaluation && gen > 0)
 	{
