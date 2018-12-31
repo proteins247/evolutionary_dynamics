@@ -797,7 +797,9 @@ int main(int argc, char** argv)
     else			// resuming from checkpoint
     {
 	nuc_sequence.clear();
+	prev_nuc_sequence.clear();
 	checkpoint.at("nuc sequence").get_to(nuc_sequence);
+	checkpoint.at("previous nuc sequence").get_to(prev_nuc_sequence);
 	NucSeqToAASeq(nuc_sequence.data(), nuc_length, aa_sequence.data());
     }
 
@@ -1059,6 +1061,7 @@ int main(int argc, char** argv)
 
 	    checkpoint["generation"] = gen;
 	    checkpoint["nuc sequence"] = nuc_sequence;
+	    checkpoint["previous nuc sequence"] = prev_nuc_sequence;
 	    checkpoint["old total translation steps"] =
 		old_total_translation_steps;
 	    checkpoint["last accepted gen"] = last_accepted_gen;
