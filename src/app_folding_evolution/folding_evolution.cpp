@@ -922,7 +922,8 @@ int main(int argc, char** argv)
 	    latfold_output_frequency,
 	    save_conformations);
 
-	std::cout << "RNG STATE; GEN " << gen << std::endl;
+	if (!g_world_rank)
+	    std::cout << "RNG STATE; GEN " << gen << std::endl;
 	std::string rankname("Rank " + std::to_string(g_world_rank));
 	printf_counter(rankname.c_str());
 

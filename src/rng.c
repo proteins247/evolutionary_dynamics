@@ -96,12 +96,12 @@ void printf_counter(const char * prefix)
 {
     if (prefix)
     {
-        printf("%s: %llu %llu %llu %llu\n", prefix,
-               ctr.v[0], ctr.v[1], ctr.v[2], ctr.v[3]);
+        printf("%s: %lu %lu %lu %lu %uhh\n", prefix,
+               ctr.v[0], ctr.v[1], ctr.v[2], ctr.v[3], randomNumberIndex);
     }
     else
     {
-        printf("%llu %llu %llu %llu\n",
-               ctr.v[0], ctr.v[1], ctr.v[2], ctr.v[3]);
+        printf("%lu %lu %lu %lu %uhh\n",
+               ctr.v[0], ctr.v[1], ctr.v[2], ctr.v[3], randomNumberIndex);
     }
 }
