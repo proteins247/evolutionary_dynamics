@@ -28,7 +28,8 @@ void set_threefry_array(uint64_t uk0, uint64_t uk1,
 
 /* Sets RNG counter (state) */
 void set_threefry_counter(uint64_t uc0, uint64_t uc1,
-                          uint64_t uc2, uint64_t uc3);
+                          uint64_t uc2, uint64_t uc3,
+			  unsigned char index);
 
 /*  */
 void set_threefry_result(uint64_t result0, uint64_t result1,
@@ -40,7 +41,8 @@ void set_threefry_result(uint64_t result0, uint64_t result1,
 void get_rng_state(uint64_t * current_key,
 		   uint64_t * current_counter,
 		   uint64_t * current_result,
-		   unsigned char * current_index);
+		   unsigned char * current_index,
+		   unsigned char * counter_index);
 
 
 /* Return double in range [0., 1.) */

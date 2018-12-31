@@ -922,6 +922,7 @@ int main(int argc, char** argv)
 	    latfold_output_frequency,
 	    save_conformations);
 
+	// Diagnostic statements
 	if (!g_world_rank)
 	    std::cout << "RNG STATE; GEN " << gen << std::endl;
 	MPI_Barrier(MPI_COMM_WORLD);
@@ -950,7 +951,7 @@ int main(int argc, char** argv)
 	    old_fitness = calculate_fitness(old_folded_fraction);
 	}
 	else if (!proc_does_reevaluation)
- {
+	{
 	    std::ostringstream output_dir;
 	    std::ostringstream hdf5_output_file;
 	    output_dir << lat_sim_out_path << "/gen" << std::setw(5)
@@ -1203,17 +1204,20 @@ json open_checkpoint_file(const std::string & checkpoint_path)
     json rng_counter_values = checkpoint.at("rng counter");
     json rng_result_values = checkpoint.at("rng result");
     json rng_indices = checkpoint.at("rng index");
+    json counter_indicies = checkpoint.at("rng counter index");
     std::vector<uint64_t> rng_key;
     std::vector<uint64_t> rng_counter;
     std::vector<uint64_t> rng_result;
     unsigned char rng_index;
+    unsigned char counter_index;
     rng_keys[g_world_rank].get_to(rng_key);
     rng_counter_values[g_world_rank].get_to(rng_counter);
     rng_result_values[g_world_rank].get_to(rng_result);
     rng_indices[g_world_rank].get_to(rng_index);
+    counter_indices[g_world_rank].get_to(counter_index);
     set_threefry_array(rng_key[0], rng_key[1], rng_key[2], rng_key[3]);
     set_threefry_counter(rng_counter[0], rng_counter[1],
-			 rng_counter[2], rng_counter[3]);
+			 rng_counter[2], rng_counter[3], counter_index);
     set_threefry_result(rng_result[0], rng_result[1],
 			rng_result[2], rng_result[3], rng_index);
 
@@ -1269,8 +1273,9 @@ void write_checkpoint(
     std::vector<uint64_t> rng_counter(4, 0);
     std::vector<uint64_t> rng_result(4, 0);
     unsigned char rng_index;
+    unsigned char counter_index;
     get_rng_state(rng_key.data(), rng_counter.data(), rng_result.data(),
-		  &rng_index);
+		  &rng_index, &counter_index);
     if (g_world_rank)
     {
 	// mpi send
@@ -1278,6 +1283,7 @@ void write_checkpoint(
 	MPI_Send(rng_counter.data(), 4, MPI_UINT64_T, 0, 1, MPI_COMM_WORLD);
 	MPI_Send(rng_result.data(), 4, MPI_UINT64_T, 0, 2, MPI_COMM_WORLD);
 	MPI_Send(&rng_index, 1, MPI_UINT8_T, 0, 3, MPI_COMM_WORLD);
+	MPI_Send(&counter_index, 1, MPI_UINT8_T, 0, 4, MPI_COMM_WORLD);
     }
     else
     {
@@ -1285,6 +1291,7 @@ void write_checkpoint(
 	checkpoint["rng counter"].push_back(rng_counter);
 	checkpoint["rng result"].push_back(rng_result);
 	checkpoint["rng index"].push_back(rng_index);
+	checkpoint["rng counter index"].push_back(counter_index);
 	// mpi recv
 	for (int i=1; i<g_world_size; ++i)
 	{
@@ -1296,10 +1303,13 @@ void write_checkpoint(
 		&g_status);
 	    MPI_Recv(&rng_index, 1, MPI_UINT8_T, i, 3, MPI_COMM_WORLD,
 		&g_status);
+	    MPI_Recv(&counter_index, 1, MPI_UINT8_T, i, 4, MPI_COMM_WORLD,
+		&g_status);	    
 	    checkpoint["rng key"].push_back(rng_key);
 	    checkpoint["rng counter"].push_back(rng_counter);
 	    checkpoint["rng result"].push_back(rng_result);
 	    checkpoint["rng index"].push_back(rng_index);
+	    checkpoint["rng counter index"].push_back(counter_index);
 	}
     }
 
