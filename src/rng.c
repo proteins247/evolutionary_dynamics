@@ -92,7 +92,16 @@ uint64_t threefryrand_int()
     return result.v[randomNumberIndex++];
 }
 
-void printf_counter()
+void printf_counter(char * prefix)
 {
-    printf("%lu %lu %lu %lu\n", ctr.v[0], ctr.v[1], ctr.v[2], ctr.v[3]);
+    if (prefix)
+    {
+        printf("%s: %llu %llu %llu %llu\n", prefix,
+               ctr.v[0], ctr.v[1], ctr.v[2], ctr.v[3]);
+    }
+    else
+    {
+        printf("%llu %llu %llu %llu\n",
+               ctr.v[0], ctr.v[1], ctr.v[2], ctr.v[3]);
+    }
 }

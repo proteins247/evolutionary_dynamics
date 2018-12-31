@@ -50,6 +50,6 @@ double threefryrand();
 uint64_t threefryrand_int();
 
 /* diagnostic */
-void printf_counter();
+void printf_counter(char * prefix);
 
 #endif /* RNG_H_ */
