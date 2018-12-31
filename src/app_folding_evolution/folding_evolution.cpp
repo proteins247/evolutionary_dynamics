@@ -1204,7 +1204,7 @@ json open_checkpoint_file(const std::string & checkpoint_path)
     json rng_counter_values = checkpoint.at("rng counter");
     json rng_result_values = checkpoint.at("rng result");
     json rng_indices = checkpoint.at("rng index");
-    json counter_indicies = checkpoint.at("rng counter index");
+    json counter_indices = checkpoint.at("rng counter index");
     std::vector<uint64_t> rng_key;
     std::vector<uint64_t> rng_counter;
     std::vector<uint64_t> rng_result;
