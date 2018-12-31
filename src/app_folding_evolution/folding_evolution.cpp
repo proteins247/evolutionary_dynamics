@@ -152,7 +152,7 @@ bool make_path(const std::string& path);
 
 // Remove path
 // https://stackoverflow.com/questions/734717/how-to-delete-a-folder-in-c
-void remove_dir(char *path);
+void remove_dir(const char *path);
 
 // Load simulation checkpoint file.
 json open_checkpoint_file(const std::string& checkpoint_path);
@@ -1139,27 +1139,27 @@ bool make_path(const std::string& path)
 
 
 // https://stackoverflow.com/questions/734717/how-to-delete-a-folder-in-c
-void remove_dir(char *path)
+void remove_dir(const char *path)
 {
     struct dirent *entry = NULL;
     DIR *dir = NULL;
     dir = opendir(path);
-    while (entry = readdir(dir))
+    while ((entry = readdir(dir)))
     {   
 	DIR *sub_dir = NULL;
 	FILE *file = NULL;
-	char* abs_path new char[1024];
+	char* abs_path = new char[1024];
 	if ((*(entry->d_name) != '.') || ((strlen(entry->d_name) > 1) && (entry->d_name[1] != '.')))
 	{   
 	    sprintf(abs_path, "%s/%s", path, entry->d_name);
-	    if(sub_dir = opendir(abs_path))
+	    if((sub_dir = opendir(abs_path)))
 	    {   
 		closedir(sub_dir);
 		remove_dir(abs_path);
 	    }   
 	    else 
 	    {   
-		if(file = fopen(abs_path, "r"))
+		if((file = fopen(abs_path, "r")))
 		{   
 		    fclose(file);
 		    remove(abs_path);
