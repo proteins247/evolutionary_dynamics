@@ -924,6 +924,7 @@ int main(int argc, char** argv)
 
 	if (!g_world_rank)
 	    std::cout << "RNG STATE; GEN " << gen << std::endl;
+	MPI_Barrier(MPI_WORLD_COMM);
 	std::string rankname("Rank " + std::to_string(g_world_rank));
 	printf_counter(rankname.c_str());
 
