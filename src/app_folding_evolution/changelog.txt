@@ -1,13 +1,15 @@
 # Changelog for folding_evolution
 
-## [0.0.4] - 2018-12-15
+## [0.0.4] - 2018-12-31
 ### Added
-- Checkpointing of simulation state for resuming
+- Checkpointing of simulation state for resuming after crash.
 ### Changed
 - Option to save conformations, named save-conformations
-- Save folded conformation in JSON-format log
+- In JSON log, also save folded conformation
+- Use latpack/1.9.1-9, which defaults to overwriting hdf5 output.
 ### Fixed
-- total_translation_steps
+- Correct value of total_translation_steps used for reevaluation
+- Folding before ribosome release is now properly treated as folded
 - json log count of old evaluations
 
 ## [0.0.3a] - 2018-11-18

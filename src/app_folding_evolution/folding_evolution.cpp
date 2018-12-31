@@ -1269,6 +1269,7 @@ void write_checkpoint(
     checkpoint["rng counter"] = json::array();
     checkpoint["rng result"] = json::array();
     checkpoint["rng index"] = json::array();
+    checkpoint["rng counter index"] = json::array();
     std::vector<uint64_t> rng_key(4, 0);
     std::vector<uint64_t> rng_counter(4, 0);
     std::vector<uint64_t> rng_result(4, 0);
