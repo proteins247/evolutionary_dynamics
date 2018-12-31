@@ -656,6 +656,7 @@ int main(int argc, char** argv)
 	int checkpoint_reevaluation_size;
 
 	checkpoint = open_checkpoint_file(checkpoint_path);
+	MPI_Barrier(MPI_COMM_WORLD);
 	checkpoint.at("out path").get_to(out_path);
 	checkpoint.at("json log path").get_to(json_log_path);
 	checkpoint.at("lat sim path").get_to(lat_sim_out_path);
