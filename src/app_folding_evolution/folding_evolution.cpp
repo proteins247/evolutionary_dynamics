@@ -1,7 +1,7 @@
 /* 
- * folding_evolution v0.0.4
+ * folding_evolution v0.0.5
  *
- * v0.0.4 implements checkpointing
+ * v0.0.5 adds a instant ribosome release option.
  * 
  *
  */
@@ -94,6 +94,8 @@ static const std::string helptext =
     "  -r, --seed=N              RNG seed. Default=1\n"
     "  -t, --temperature=T       Temperature of latFoldVec simulations.\n"
     "                            Default=0.3\n"
+    "  -z, --instant-release     Release from ribosome immediately after\n"
+    "                            translation.\n"
     "      --help   Display this help and exit.\n"
     "\n"
     "Format of the output files:\n"
@@ -348,6 +350,7 @@ int main(int argc, char** argv)
     bool debug_mode = false;
     bool save_conformations = false;
     bool resume_from_checkpoint = false;
+    bool instant_ribosome_release = false;
     int random_codons = 0;
     int population_size = DEFAULT_POPULATION_SIZE;
     std::string folded_conformation;
@@ -404,10 +407,11 @@ int main(int argc, char** argv)
 	{"save-conformations", no_argument, NULL, 'c'},
 	{"debug", no_argument, NULL, 'd'},
 	{"help", no_argument, NULL, 'h'},
+	{"instant-release", no_argument, NULL, 'z'},
 	{NULL, 0, NULL, 0}
     };
 
-    while ((c = getopt_long(argc, argv, "f:k:l:m:n:o:p:r:s:t:hdc",
+    while ((c = getopt_long(argc, argv, "f:k:l:m:n:o:p:r:s:t:cdhz",
 			    long_options, &option_index))
 	   != -1)
     {
@@ -521,6 +525,9 @@ int main(int argc, char** argv)
 		print_error(err.str(), debug_mode);
 		exit(PARSE_ERROR);
 	    }
+	    break;
+	case 'z':
+	    instant_ribosome_release = true;
 	    break;
 	case '?':
 	    // getopt_long will print an error message
@@ -677,6 +684,8 @@ int main(int argc, char** argv)
 	json_log.at("degradation timescale").get_to(degradation_param);
 	json_log.at("latpack path").get_to(latpack_path);
 	json_log.at("translation params").get_to(speedparams_path);
+	json_log.at("instant ribosome release").get_to(
+	    instant_ribosome_release);
 	json_log.at("mutation mode").get_to(mutation_mode);
 
 	// Check that simulations_per_gen agrees with number of processors
@@ -842,6 +851,7 @@ int main(int argc, char** argv)
 	    json_log["degradation timescale"] = degradation_param;
 	    json_log["latpack path"] = latpack_path;
 	    json_log["translation params"] = speedparams_path;
+	    json_log["instant ribosome release"] = instant_ribosome_release;
 	    json_log["rng seed"] = rng_seed;
 	    json_log["mutation mode"] = mutation_mode;
 	    json_log["trajectory"] = json::array();
@@ -907,8 +917,13 @@ int main(int argc, char** argv)
     for (; gen < n_gens; ++gen)
     {
 	// Compose the simulation parameters.
+	int final_time = stop_codon_times[0];
+	if (instant_ribosome_release)
+	{
+	    final_time = 0;
+	}
 	translation_schedule = make_translation_schedule(
-	    translation_times, codon_sequence, stop_codon_times[0],
+	    translation_times, codon_sequence, final_time,
 	    &total_translation_steps);
 	PrintAASequence(
 	    aa_sequence_str.get(), aa_sequence.data(), protein_length);
