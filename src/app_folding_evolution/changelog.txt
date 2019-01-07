@@ -1,5 +1,9 @@
 # Changelog for folding_evolution
 
+## [0.0.5] - 2019-01-07
+### Added
+- New option --instant-release
+
 ## [0.0.4] - 2018-12-31
 ### Added
 - Checkpointing of simulation state for resuming after crash.
