@@ -3,6 +3,8 @@
 ## [0.0.5] - 2019-01-07
 ### Added
 - New option --instant-release
+### Changed
+- Simulation stops after N_GENS is reached and evaluated, not before.
 
 ## [0.0.4] - 2018-12-31
 ### Added
