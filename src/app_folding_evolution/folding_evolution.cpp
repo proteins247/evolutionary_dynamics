@@ -914,7 +914,7 @@ int main(int argc, char** argv)
     }
 
     // Begin running simulation loop
-    for (; gen < n_gens; ++gen)
+    for (; gen <= n_gens; ++gen)
     {
 	// Compose the simulation parameters.
 	int final_time = stop_codon_times[0];
