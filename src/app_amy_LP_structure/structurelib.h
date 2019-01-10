@@ -5,8 +5,6 @@
 #include<math.h>
 #include<stdlib.h>
 
-#include"structurelib.h"
-
 #define NUMCONF         10000
 #define GENES			2
 

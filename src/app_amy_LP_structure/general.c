@@ -6,7 +6,7 @@
 #include<assert.h>
 
 #include "structurelib.h"
-#include "../RNG/generator.h"
+#include "../rng.h"
 
 void InitNegOne(int *list, int len)
 {
@@ -120,7 +120,7 @@ int RandomBit()
 {
    int c;
    double t;
-   t = (double)JKISS()/THE_MAX;
+   t = threefryrand();
    if (t<0.5) {c=0;}
    else {c=1;}
    //printf("%f\t", t);
@@ -135,7 +135,7 @@ int AcceptOrRejectAttempt(double diff , double Tsel )
    double r, crit;
    int accept;
    
-   r = (double)JKISS()/THE_MAX;
+   r = threefryrand();
    crit = exp(-( diff )/Tsel);
    //printf("%f\t%f\t%f\t", diff, r, crit);
 
@@ -151,7 +151,7 @@ int AcceptOrRejectAttempt2(double diff1, double diff2, double Tsel )
    double r, crit1, crit2;
    int accept;
    
-   r = (double)JKISS()/THE_MAX;
+   r = threefryrand();
    crit1 = exp(-( diff1)/Tsel);
    crit2 = exp(-( diff2)/Tsel);
    //printf("%f\t%f\t%f\t", diff, r, crit);

@@ -4,7 +4,7 @@
 #include<string.h>
 
 #include"structurelib.h"
-#include"../LP/latticelib.h"
+#include"../latticelib.h"
 
 int CoordMatrix[NUMCONF][81];
 int AllFaces[NUMCONF*6*4][9];

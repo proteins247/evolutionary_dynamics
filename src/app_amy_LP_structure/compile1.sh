@@ -1,1 +1,1 @@
-gcc -o ./MC1 generateStableGene.c general.c structurelib.c ../LP/gencode.c ../LP/latticelib.c ../RNG/generator.c -lz -lm -Wall -g3
+gcc -Wall -g -o generateStableGene generateStableGene.c general.c structurelib.c ../gencode.o ../latticelib.o ../rng.o -lz -lm
