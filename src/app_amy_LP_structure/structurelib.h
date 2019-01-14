@@ -18,5 +18,6 @@ void GetSquare(int structid, int face, int Square[3][3]);
 void RotateSquare(int code, int dest[3][3], int src[3][3]);
 void MakeAllFaces(void);
 void MakeContactMatrix(void);
-void ReadCommondata(void);
+void ReadCommondata(char * location, char * energyName);
+void PrintFoldedConformation(int structid, char * conformation);
 #endif

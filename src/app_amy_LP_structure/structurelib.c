@@ -8,46 +8,57 @@
 
 int CoordMatrix[NUMCONF][81];
 int AllFaces[NUMCONF*6*4][9];
-char ContactMatrixA[NUMCONF][32]; // contact matrix
-char ContactMatrixB[NUMCONF][32]; 
+/* char ContactMatrixA[NUMCONF][32]; // contact matrix */
+/* char ContactMatrixB[NUMCONF][32];  */
 
 void ReadCoordMatrix(char *filename)
 {
-FILE *infile;
-int i,j;
-int xmin,ymin,zmin;
+    FILE *infile;
+    int i, j;
+    int xmin, ymin, zmin;
 
-infile=fopen(filename,"r");
-if (!infile) {fprintf(stderr,"cannot read coord matrix\n"); exit(1);}
+    infile = fopen(filename,"r");
+    if (!infile)
+    {
+	fprintf(stderr,"cannot read coord matrix\n");
+	exit(1);
+    }
 
-for(i=0;i<NUMCONF;i++)
-for(j=0;j<81;j++)
-fscanf(infile,"%d",&CoordMatrix[i][j]);
+    for (i = 0; i < NUMCONF; i++)
+	for (j = 0; j < 81; j++)
+	    fscanf(infile, "%d", &CoordMatrix[i][j]);
 
-fclose(infile);
+    fclose(infile);
 
-// adjust to bottom left corner @ 0,0,0
-for(i=0;i<NUMCONF;i++)
-{
-xmin=ymin=zmin=100000;
+    // adjust to bottom left corner @ 0,0,0
+    /* 
+     * Note by Victor: as far as I can tell, every lattice protein 
+     * in the coordinate file coord10000.dat has a vertex at (0, 0, 0),
+     * so this seems like a useless operation. 
+     */
+    for (i = 0; i < NUMCONF; i++)
+    {
+	xmin = ymin = zmin = 100000;
 
-for(j=0;j<27;j++)
-{
-if (CoordMatrix[i][3*j+0]<xmin) xmin=CoordMatrix[i][3*j+0];
-if (CoordMatrix[i][3*j+1]<ymin) ymin=CoordMatrix[i][3*j+1];
-if (CoordMatrix[i][3*j+2]<zmin) zmin=CoordMatrix[i][3*j+2];
-}
+	for (j = 0; j < 27; j++)
+	{
+	    if (CoordMatrix[i][3 * j + 0] < xmin)
+		xmin = CoordMatrix[i][3 * j + 0];
+	    if (CoordMatrix[i][3 * j + 1] < ymin)
+		ymin = CoordMatrix[i][3 * j + 1];
+	    if (CoordMatrix[i][3 * j + 2] < zmin)
+		zmin = CoordMatrix[i][3 * j + 2];
+	}
 
-for(j=0;j<27;j++)
-{
-CoordMatrix[i][3*j+0]-=xmin;
-CoordMatrix[i][3*j+1]-=ymin;
-CoordMatrix[i][3*j+2]-=zmin;
-}
-
-}
-//printf("coord10000.dat read\n");
-return;
+	for (j = 0; j < 27; j++)
+	{
+	    CoordMatrix[i][3 * j + 0] -= xmin;
+	    CoordMatrix[i][3 * j + 1] -= ymin;
+	    CoordMatrix[i][3 * j + 2] -= zmin;
+	}
+    }
+    // printf("coord10000.dat read\n");
+    return;
 }
 
 
@@ -251,42 +262,99 @@ return;
 }
 
 void MakeContactMatrix()		//unecessary, can have it read in. in general it seems that this file was created to not have to read in contact matrix
+/* 
+ * Note by Victor: By "unecessary," I think it's meant that the file 
+ * contact10000.dat exists, and there is a function to read the file
+ * in latticelib. Here, ContactMatrixA and ContactMatrixB are filled
+ * in using the coordinates of the 10000 lattice proteins.
+ */
 {
-  int kk, ii, jj, mm, c=0, cont=0;
-  int tmp1[3], tmp2[3];
+    int kk, ii, jj, mm;
+    int coord1[3], coord2[3];
 
-  for(kk=0; kk<NUMCONF; kk++)
-  {
-   c = 0;
-   for(ii=0; ii<81; ii+=3)
-   {
-       for(mm=0; mm<3; mm++)     { tmp1[mm] = CoordMatrix[kk][ii+mm]; } //printf("%d ", tmp1[mm]); }
-       for(jj=ii+9; jj<81; jj+=3)
-       {
-          cont = 0;
-          for(mm=0; mm<3; mm++)  { tmp2[mm] = CoordMatrix[kk][jj+mm]; } //printf("%d ", tmp2[mm]);     
-          for(mm=0; mm<3; mm++)    cont += abs(tmp2[mm] - tmp1[mm]);
-          if(cont==1)
-          {
-             ContactMatrixA[kk][c]=jj/3;
-             ContactMatrixB[kk][c]=ii/3;
-             c++;
-          }
-       }
+    for (kk = 0; kk < NUMCONF; kk++) /* For each lattice protein */
+    {
+	int c = 0;
+	for (ii = 0; ii < 81; ii += 3) /* For each coordinate */
+	{
+	    /* Read x, y, z into coord1 */
+	    for (mm = 0; mm < 3; mm++)
+	    {
+		coord1[mm] = CoordMatrix[kk][ii+mm];
+	    } //printf("%d ", coord1[mm]); }
+
+	    /* Beginning with i+3rd coordinate (i+1 and i+2 can't make contact) */
+	    for (jj = ii + 9; jj < 81; jj += 3)
+	    {
+		/* Read x, y, z into coord2 */
+		for (mm = 0; mm < 3; mm++)
+		{
+		    coord2[mm] = CoordMatrix[kk][jj+mm];
+		} //printf("%d ", coord2[mm]);
+
+		int contact = 0;
+		for (mm = 0; mm < 3; mm++)
+		{
+		    contact += abs(coord2[mm] - coord1[mm]);
+		}
+		if (contact == 1)
+		{
+		    ContactMatrixA[kk][c] = jj / 3;
+		    ContactMatrixB[kk][c] = ii / 3;
+		    c++;
+		}
+	    }
+	}
     }
-   }
-   return;
+
+    return;
 }
 
-void ReadCommondata()
+void ReadCommondata(char * location, char * energyName)
 {
-char rootdir[100], file[100];
-sprintf(rootdir,"%s","/n/home12/rrazban/code");
-sprintf(file, "%s/commondata/LPforms/coord10000.dat", rootdir);
-ReadCoordMatrix(file);
-MakeAllFaces();
-MakeContactMatrix();
-sprintf(file, "%s/commondata/MJ96/energy.dat", rootdir);
-ReadEnergyMatrix(file);
-return;
+    char path[500];
+
+    sprintf(path, "%s/LPforms/coord10000.dat", location);
+    ReadCoordMatrix(path);
+    MakeAllFaces();
+    MakeContactMatrix();
+
+    if (energyName)		/* if not void */
+    {
+	sprintf(path, "%s/MJ96/%s.dat", location, energyName);
+    }
+    else
+    {
+	sprintf(path, "%s/MJ96/energy.dat", location);
+    }
+    ReadEnergyMatrix(path);
+    return;
+}
+
+void PrintFoldedConformation(int structid, char * conformation)
+{
+    int i;
+    for (i = 0; i < AASEQLEN - 1; ++i)
+    {
+	int x_difference = CoordMatrix[structid][3 * i + 3]
+	    - CoordMatrix[structid][3 * i];
+	int y_difference = CoordMatrix[structid][3 * i + 4]
+	    - CoordMatrix[structid][3 * i + 1];
+	int z_difference = CoordMatrix[structid][3 * i + 5]
+	    - CoordMatrix[structid][3 * i + 2];
+	if (x_difference == 1)
+	    conformation[i] = 'F';
+	else if (x_difference == -1)
+	    conformation[i] = 'B';
+	else if (y_difference == 1)
+	    conformation[i] = 'R';
+	else if (y_difference == -1)
+	    conformation[i] = 'L';
+	else if (z_difference == 1)
+	    conformation[i] = 'U';
+	else if (z_difference == -1)
+	    conformation[i] = 'D';
+    }
+    conformation[AASEQLEN - 1] = '\0';
+    return;
 }
