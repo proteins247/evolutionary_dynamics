@@ -78,26 +78,66 @@ void ReadEnergyMatrix(char *filename)
     double tmp3;
     
     infile = fopen(filename,"r");
-    if (!infile) { fprintf(stderr, "no energy matrix\n"); exit(1); }
-    for(i=0;i<ALPHABET;i++)
+    if (!infile)
     {
-        for(j=0;j<ALPHABET;j++)
+        fprintf(stderr, "no energy matrix\n");
+        exit(1);
+    }
+    for (i = 0; i < ALPHABET; i++)
+    {
+        for (j = 0; j < ALPHABET; j++)
         {
-            fscanf(infile,"%d %d %lf\n",&tmp1, &tmp2, &tmp3);
-            EnergyMatrix[tmp1][tmp2]=tmp3+3.16;	//mean of MJ96 is -3.16
+            fscanf(infile,"%d %d %lf\n", &tmp1, &tmp2, &tmp3);
+            EnergyMatrix[tmp1][tmp2] = tmp3 + 3.16;	//mean of MJ96 is -3.16
+            EnergyMatrix[tmp1][tmp2] = tmp3;
         }
     }
     fclose(infile);
     
-    /*
+    
      // debug dump
-     for(i=0;i<ALPHABET;i++)for(j=0;j<ALPHABET;j++) printf("%d\t%d\t%.2f\n",i,j, EnergyMatrix[i][j]);
-     */
+     /* for (i=0; i<ALPHABET; i++) */
+     /* { */
+     /*     for(j=0; j<ALPHABET; j++) */
+     /*     { */
+     /*         printf(" %5.2f", EnergyMatrix[i][j]); */
+     /*     } */
+     /*     printf("\n"); */
+     /* } */
+             /* printf("%d\t%d\t%.2f\n", i, j, EnergyMatrix[i][j]); */
     
     fprintf(stderr,"EnergyMatrix reads!\n");
     
     return;
 } //ReadEnergyMatrix
+
+
+/*
+ * subtractMeanFromEnergyMatrix(void)
+ * Calculates mean value of energy matrix and
+ * subtracts it from each value in energy matrix.
+ */
+void subtractMeanFromEnergyMatrix()
+{
+    double mean = 0;
+    int i, j;
+    for (i = 0; i < ALPHABET; ++i)
+    {
+	for (j = 0; j < ALPHABET; ++j)
+	{
+	    mean += EnergyMatrix[i][j];
+	}
+    }
+    mean /= (double)(ALPHABET * ALPHABET);
+    for (i = 0; i < ALPHABET; ++i)
+    {
+	for (j = 0; j < ALPHABET; ++j)
+	{
+	    EnergyMatrix[i][j] -= mean;
+	}
+    }
+    return;
+}
 
 
 /*
@@ -107,18 +147,20 @@ void ReadEnergyMatrix(char *filename)
  */
 double SequenceEnergy(int *Seq, int conformnumber)
 {
-    int i,j,k;
-    double e=0.;
+    int i, j, k;
+    double e = 0.;
     
     // here we imply that it is a 27-mer!!
     // in general, go nested 1..AASEQLEN and lookup ContMatrix
     
     //for(k=0; k<ContactMatrixLen[conformnumber]; k++)
-    for(k=0; k<HALFCONTMATRLEN; k++)
+    for (k = 0; k < HALFCONTMATRLEN; k++)
     {
         i =  ContactMatrixA[conformnumber][k];
         j =  ContactMatrixB[conformnumber][k];
         e += EnergyMatrix[Seq[i]][Seq[j]];
+        /* printf("%2d %2d %2d %2d %2d %5.2f\n", */
+        /*        k, i, j, Seq[i], Seq[j], EnergyMatrix[Seq[i]][Seq[j]]); */
     }
     return e;
 }
@@ -131,15 +173,19 @@ double SequenceEnergy(int *Seq, int conformnumber)
  */
 double GetSequenceMinEnergy(int *Seq, int *atwhatconform)
 {
-    int i,j;
-    double e,emin=0.;
+    int i, j;
+    double e, emin = 0.;
     emin = SequenceEnergy(Seq, 0);
-    j=0;
+    j = 0;
     
-    for(i=1;i<NUMCONF; i++)
+    for (i = 1; i < NUMCONF; i++)
     {
         e = SequenceEnergy(Seq, i);
-        if (e<emin) {emin=e; j = i; }
+        if (e < emin)
+        {
+            emin = e;
+            j = i;
+        }
     }
     
     *atwhatconform = j;
@@ -313,12 +359,13 @@ void PrintAACodeSequence(char *buf, int *Seq, int Len)
 double GetStructurePnat(int *Seq, double T, int structid)
 {
     int i;
-    double z=0.0e0, emin;
-    emin=SequenceEnergy(Seq,structid);
-    for(i=0;i<NUMCONF;i++) {
-        z+=exp(-(SequenceEnergy(Seq,i)-emin)/T);
+    double z = 0.0e0, emin;
+    emin = SequenceEnergy(Seq, structid);
+    for (i=0; i<NUMCONF;i++)
+    {
+        z += exp(-(SequenceEnergy(Seq,i) - emin) / T);
     }
-    return 1.0e0/z;
+    return 1.0e0 / z;
 }
 
 /*
@@ -333,29 +380,34 @@ double GetStructurePnat(int *Seq, double T, int structid)
  */
 double GetSequencePnat(int *Seq, double T, int *conform)
 {
-    int i,j;
-    double emin,z,p;
+    int i, j;
+    double emin, z, p;
     
-    emin = 1e20; j=-1;
+    emin = 1e20;
+    j = -1;
     
-    for(i=0; i<NUMCONF; i++)
+    for (i = 0; i < NUMCONF; i++)
     {
-        espectrum[i] =  SequenceEnergy(Seq,i);
-        if (espectrum[i]<emin)  { emin=espectrum[i]; j=i; }
+        espectrum[i] = SequenceEnergy(Seq, i);
+        if (espectrum[i] < emin)
+        {
+            emin = espectrum[i];
+            j = i;
+        }
     }
     *conform = j;
     
     // subtract emin to avoid exp(-E) overflows in partition function
-    for(i=0; i<NUMCONF; i++) espectrum[i] = espectrum[i]-emin;
+    for (i = 0; i < NUMCONF; i++)
+        espectrum[i] -= emin;
+
     emin = 0;
+    z = 0.;
+
+    for (i = 0; i < NUMCONF; i++)
+        z += exp(-espectrum[i] / T);
     
-    z = 0.; for(i=0; i<NUMCONF; i++) z = z + exp(-espectrum[i]/T);
-    
-//    if (state_3rd>0.0){
-  //      z=z+state_3rd; //2.6e27
-//    }
-    
-    p= exp(-emin/T)/z;
+    p = exp(-emin / T) / z;
     //printf("P=%f\n", p);
     return p;
 }
@@ -628,20 +680,3 @@ void ConvertAAtoHydro(int *aaseq, int *new_aaseq, int currLen){
         new_aaseq[i]=HydrophobicityYesNo[aaseq[i]];
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

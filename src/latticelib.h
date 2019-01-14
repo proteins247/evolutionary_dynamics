@@ -20,7 +20,7 @@ extern double EnergyMatrix[ALPHABET][ALPHABET];
 extern double espectrum[NUMCONF]; // used in Pnat calculation
 
 /*
-void ReadContactMatrix(void)
+void ReadContactMatrix(char * filename)
 reads the lists of contacts for all 103346 structures
 Input:
 none, but check the path to contact103346.dat
@@ -32,7 +32,7 @@ void ReadContactMatrix(char *filename);
 
 
 /*
-void ReadEnergyMatrix(void)
+void ReadEnergyMatrix(char * filename)
 Reads amino acid energy interaction matrix. MJ96 = Miyazawa and Jernigan 1996
 input: none, but check the file path
 output:
@@ -40,6 +40,13 @@ EnergyMatrix[][]
 */
 void ReadEnergyMatrix(char *filename);
 
+
+/*
+ * subtractMeanFromEnergyMatrix(void)
+ * Calculates mean value of energy matrix and
+ * subtracts it from each value in energy matrix.
+ */
+void subtractMeanFromEnergyMatrix();
 
 /*
 double SequenceEnergy(int *Seq, int i)
