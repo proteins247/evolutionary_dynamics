@@ -114,7 +114,7 @@ static const int LATPACK_ERROR = 4;
 // default values
 static const int GENS_MAX = 99999;
 static const std::string DEFAULT_LATPACK_PATH =
-    "/n/home00/vzhao/pkg/latPack/1.9.1-9/";
+    "/n/home00/vzhao/pkg/latPack/1.9.1-10/";
 static const std::string DEFAULT_OUTPATH = "./out";
 static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_LATFOLD_OUTFREQ = 10000;
@@ -267,14 +267,14 @@ double calculate_fitness(
 // @param n_reevaluators The number of simulations run to estimate
 //        the new fitness value.
 // @param n_total The total number of CPUs running simulations.
-// @param n_gens_without_mutation Number of generations since last
+// @param n_gens_without_accept Number of generations since last
 //        accepted mutation.
 double reaverage_folded_fraction(
     double old_folded_fraction,
     double new_folded_fraction,
     int n_reevaluators,
     int n_total,
-    int n_gens_without_mutation);
+    int n_gens_without_accept);
 
 
 // Print the header for simulation text log.
@@ -300,7 +300,7 @@ void print_state(
 void save_state(
     json& json_log,
     int generation,
-    int n_gens_without_mutation,
+    int n_gens_without_accept,
     int mutation_type,
     std::vector<AminoAcid> & aa_sequence,
     std::vector<int> & nuc_sequence,
@@ -883,7 +883,7 @@ int main(int argc, char** argv)
     int old_total_translation_steps;
     int total_translation_steps;
     int last_accepted_gen = 0;
-    int n_gens_without_mutation = 0;
+    int n_gens_without_accept = 0;
     int mutation_type = -1;
     double old_fitness = 0.001;
     double fitness;
@@ -904,8 +904,8 @@ int main(int argc, char** argv)
 	checkpoint.at("old total translation steps").get_to(
 	    old_total_translation_steps);
 	checkpoint.at("last accepted gen").get_to(last_accepted_gen);
-	checkpoint.at("n gens without mutation").get_to(
-	    n_gens_without_mutation);
+	checkpoint.at("n gens without accept").get_to(
+	    n_gens_without_accept);
 	checkpoint.at("mutation type").get_to(mutation_type);
 	checkpoint.at("old fitness").get_to(old_fitness);
 	checkpoint.at("old folded fraction").get_to(old_folded_fraction);
@@ -944,7 +944,7 @@ int main(int argc, char** argv)
 	    output_dir << lat_sim_out_path << "/gen" << std::setw(5)
 		       << std::setfill('0') << last_accepted_gen;
 	    hdf5_output_file << output_dir.str() << "/sim" << std::setfill('0')
-			     << std::setw(5) << n_gens_without_mutation + 1
+			     << std::setw(5) << n_gens_without_accept + 1
 			     << "_" << std::setw(5) << g_subcomm_rank << ".h5";
 
 	    run_latfoldvec(prev_latfoldvec_command, hdf5_output_file.str());
@@ -955,7 +955,7 @@ int main(int argc, char** argv)
 	    // Now update old fitness
 	    old_folded_fraction = reaverage_folded_fraction(
 		old_folded_fraction, folded_fraction, g_subcomm_size,
-		g_world_size, n_gens_without_mutation);
+		g_world_size, n_gens_without_accept);
 	    old_fitness = calculate_fitness(old_folded_fraction);
 	}
 	else if (!proc_does_reevaluation)
@@ -1018,7 +1018,7 @@ int main(int argc, char** argv)
 	    // Output information
 	    print_state(outstream, gen, aa_sequence, nuc_sequence, old_fitness,
 			fitness, native_energy, accept);
-	    save_state(json_log, gen, n_gens_without_mutation, mutation_type,
+	    save_state(json_log, gen, n_gens_without_accept, mutation_type,
 		       aa_sequence, nuc_sequence, old_fitness, fitness,
 		       old_folded_fraction, folded_fraction, native_energy,
 		       (bool)accept);
@@ -1040,14 +1040,14 @@ int main(int argc, char** argv)
 	    old_total_translation_steps = total_translation_steps;
 	    old_folded_fraction = folded_fraction;
 	    old_fitness = fitness;
-	    n_gens_without_mutation = 0;
+	    n_gens_without_accept = 0;
 	    last_accepted_gen = gen;
 	}
 	else
 	{
 	    // Revert
 	    nuc_sequence = prev_nuc_sequence;
-	    n_gens_without_mutation++;
+	    n_gens_without_accept++;
 	}
 
 	// Make new mutation. We only do this on root node because of
@@ -1088,8 +1088,8 @@ int main(int argc, char** argv)
 	    checkpoint["old total translation steps"] =
 		old_total_translation_steps;
 	    checkpoint["last accepted gen"] = last_accepted_gen;
-	    checkpoint["n gens without mutation"] =
-		n_gens_without_mutation;
+	    checkpoint["n gens without accept"] =
+		n_gens_without_accept;
 	    checkpoint["mutation type"] = mutation_type;
 	    checkpoint["old fitness"] = old_fitness;
 	    checkpoint["old folded fraction"]
@@ -1460,7 +1460,7 @@ void run_latfoldvec(
 	// int fd = open("/dev/null", O_WRONLY);
 	// dup2(fd, 1);
 
-	execv(cstring_command_vec[0], cstring_command_vec.data());
+	execvp(cstring_command_vec[0], cstring_command_vec.data());
     }
 
     // wait for processes to finish
@@ -1671,13 +1671,13 @@ double reaverage_folded_fraction(
     double new_folded_fraction,
     int n_reevaluators,
     int n_total,
-    int n_gens_without_mutation)
+    int n_gens_without_accept)
 {
     // We calculate a weighted average, so here we get the weights.
-    double old_factor = (n_total + n_reevaluators * (n_gens_without_mutation - 1))
-	/ (double)(n_total + n_gens_without_mutation * n_reevaluators);
+    double old_factor = (n_total + n_reevaluators * (n_gens_without_accept - 1))
+	/ (double)(n_total + n_gens_without_accept * n_reevaluators);
     double new_factor = n_reevaluators
-	/ (double)(n_total + n_gens_without_mutation * n_reevaluators);
+	/ (double)(n_total + n_gens_without_accept * n_reevaluators);
     return old_folded_fraction * old_factor + new_folded_fraction * new_factor;
 }
 
@@ -1755,7 +1755,7 @@ void print_state(
 void save_state(
     json& json_log,
     int generation,
-    int n_gens_without_mutation,
+    int n_gens_without_accept,
     int mutation_type,
     std::vector<AminoAcid> & aa_sequence,
     std::vector<int> & nuc_sequence,
@@ -1774,9 +1774,8 @@ void save_state(
     PrintNucCodeSequence(nuc_seq_str.get(), nuc_sequence.data(), nuc_seq_len);
     
     int n_evaluations =
-	n_gens_without_mutation * (int)json_log["reevaluation size"]
-	+ ((int)json_log["simulations per gen"]
-	   - (int)json_log["reevaluation size"]);
+	n_gens_without_accept * (int)json_log["reevaluation size"]
+	+ (int)json_log["simulations per gen"];
 
     json entry;
     entry["generation"] = generation;
