@@ -117,7 +117,7 @@ static const std::string DEFAULT_LATPACK_PATH =
     "/n/home00/vzhao/pkg/latPack/1.9.1-10/";
 static const std::string DEFAULT_OUTPATH = "./out";
 static const uint64_t DEFAULT_SEED = 1;
-static const int DEFAULT_LATFOLD_OUTFREQ = 10000;
+static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
 static const int DEFAULT_CHECKPOINT_FREQ = 20;
 static const int DEFAULT_JSON_OUTFREQ = 5;
 static const int DEFAULT_POPULATION_SIZE = 500;
