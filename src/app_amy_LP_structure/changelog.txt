@@ -1,0 +1,13 @@
+
+[comment]: # -*- mode: markdown -*-
+# Changelog for protein design software
+
+## [0.0.5] - 2019-01-16
+### Added
+- Accepts command line arguments via getopt_long
+### Changed
+- Use my rng.h which uses Random123
+- Output text file can be "source"ed
+- Exit with error if failed to reach target Pnat
+### Fixed
+- No stop codons in generated sequence.

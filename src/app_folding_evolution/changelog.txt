@@ -1,10 +1,17 @@
+
+[comment]: # -*- mode: markdown -*-
 # Changelog for folding_evolution
 
-## [0.0.5] - 2019-01-07
+## [0.0.5] - 2019-01-17
 ### Added
 - New option --instant-release
 ### Changed
-- Simulation stops after N_GENS is reached and evaluated, not before.
+- Simulation stops after N_GENS is reached and evaluated, not before
+- LatFoldVec output frequency parameter set to 5000 from 10000
+- "n gens without mutation" renamed to "n gens without accept"
+### Fixed
+- Calculation of number of old evaluations for current generation was
+  off by one generation worth of evaluations
 
 ## [0.0.4] - 2018-12-31
 ### Added
