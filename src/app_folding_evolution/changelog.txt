@@ -9,6 +9,7 @@
 - Simulation stops after N_GENS is reached and evaluated, not before
 - LatFoldVec output frequency parameter set to 5000 from 10000
 - "n gens without mutation" renamed to "n gens without accept"
+- Checkpoint interval is 10 instead of 20
 ### Fixed
 - Calculation of number of old evaluations for current generation was
   off by one generation worth of evaluations
