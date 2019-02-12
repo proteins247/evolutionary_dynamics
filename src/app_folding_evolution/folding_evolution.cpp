@@ -1,7 +1,8 @@
 /* 
- * folding_evolution v0.0.5
+ * folding_evolution v0.0.6
  *
- * v0.0.5 adds a instant ribosome release option.
+ * v0.0.6 is a major change in how folding simulations are run and
+ * fitness is evaluated
  * 
  *
  */
@@ -77,8 +78,8 @@ static const std::string helptext =
     "  -c, --save-conformations  Save latFoldVec simulation conformations.\n"
     "  -d, --debug               Allow error messages from all processors.\n"
     "  -f, --from-checkpoint     Resume simulation from checkpoint file.\n"
-    "  -k, --degradation-param=K Value setting timescale for unfolded protein\n"
-    "                            degradation (penalizes slow folding).\n"
+    "  -k, --degradation-param=K Value setting timescale for protein degradation\n"
+    "                            (penalizes slow folding/low P_nat).\n"
     "  -l, --latpack-path=PATH   Latpack binaries here. Default=\n"
     "                            /n/home00/vzhao/pkg/latPack/1.9.1-8/\n"
     "  -m, --mutation-mode=M     One of 0, 1, or 2, indicating restriction to\n"
@@ -218,20 +219,20 @@ void run_latfoldvec(
     const std::string & outfile);
 
 
-// Build a vector of strings that are arguments to invoke
-// latMapTraj. Note arguments -traj is not added here.
-std::vector<std::string> compose_latmaptraj_command(
-    const std::string& latpack_path,
-    const std::string& folded_conformation);
+// // Build a vector of strings that are arguments to invoke
+// // latMapTraj. Note arguments -traj is not added here.
+// std::vector<std::string> compose_latmaptraj_command(
+//     const std::string& latpack_path,
+//     const std::string& folded_conformation);
 
 
-// FIXME (this function is not currently used)
-// Use fork and exec to run n_simulations of latMapTraj to analyze the
-// latFoldVec simulations that were run.
-void run_latmaptraj(
-    std::vector<std::string> & latmaptraj_command,
-    const std::string& h5file_base,
-    int n_simulations=1);
+// // FIXME (this function is not currently used)
+// // Use fork and exec to run n_simulations of latMapTraj to analyze the
+// // latFoldVec simulations that were run.
+// void run_latmaptraj(
+//     std::vector<std::string> & latmaptraj_command,
+//     const std::string& h5file_base,
+//     int n_simulations=1);
 
 
 // Analyze latFoldVec simulations to count number of successful
@@ -1392,7 +1393,7 @@ std::vector<std::string> compose_latfoldvec_command(
     command.push_back(latpack_path + "/bin/latFoldVec");
     command.push_back("-energyFile=" + latpack_path + "/share/latpack/MJ.txt");
     command.push_back("-seq=" + aa_sequence);
-    command.push_back("-final=" + folded_conformation);
+    command.push_back("-target=" + folded_conformation);
     command.push_back("-elongationSchedule=" + translation_schedule);
     command.push_back("-kT=" + std::to_string(temperature));
     command.push_back("-maxStepsIncrease");
@@ -1571,88 +1572,88 @@ double evaluate_folded_fraction(
     double degradation_param,
     double* native_energy)
 {
-    int folded = 0;
-    int total_n_folded = 0;
+    int functional = 0;
+    int total_n_functional = 0;
 
     // We need to read data from HDF5 file
     hid_t file_id = H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
     hid_t group_id = H5Gopen2(file_id, "traj1", H5P_DEFAULT);
+
+    // Get protein length
     hid_t sequence_attr = H5Aopen(file_id, "Sequence", H5P_DEFAULT);
     hid_t sequence_attr_t = H5Aget_type(sequence_attr);
     size_t sequence_attr_size = H5Tget_size(sequence_attr_t);
     size_t protein_length = sequence_attr_size - 1;
-    hid_t found_final_attr = H5Aopen(group_id, "Found final struct",
+    H5Tclose(sequence_attr_t);
+    H5Aclose(sequence_attr);
+
+    // Read three relevant attributes from 'traj1'
+    hid_t last_step_attr = H5Aopen(group_id, "Last step",
+				   H5P_DEFAULT);
+    hid_t conf_fraction_attr = H5Aopen(group_id, "Fraction target conf",
+				       H5P_DEFAULT);
+    hid_t conf_energy_attr = H5Aopen(group_id, "Target conf energy",
 				     H5P_DEFAULT);
-    hid_t strtype = H5Tcopy(H5T_C_S1);
-    H5Tset_size(strtype, 4);
-    hid_t last_step_attr = H5Aopen(group_id, "Last step", H5P_DEFAULT);
-    hid_t last_energy_attr = H5Aopen(group_id, "Last E", H5P_DEFAULT);
+    size_t last_step;
+    double conf_fraction;
+    double conf_energy;
 
-    char found_final[4];
-    int last_step;
-    double last_energy;
+    H5Aread(last_step_attr, H5T_NATIVE_ULLONG, &last_step);
+    H5Aread(conf_energy_attr, H5T_NATIVE_DOUBLE, &conf_fraction);
+    H5Aread(conf_fraction_attr, H5T_NATIVE_DOUBLE, &conf_energy);
 
-    H5Aread(found_final_attr, strtype, found_final);
-    H5Aread(last_energy_attr, H5T_NATIVE_DOUBLE, &last_energy);
-    H5Aread(last_step_attr, H5T_NATIVE_UINT, &last_step);
+    size_t posttranslation_steps = last_step - total_translation_steps;
 
-    if (std::strncmp(found_final, "yes", 3) == 0)
+    if (conf_fraction > 0)
     {
-	int posttranslation_steps = last_step - total_translation_steps;
-	if (posttranslation_steps < 0)
+	double one_minus_pnat = 1 - conf_fraction;
+	double posttranslation_time =
+	    posttranslation_steps / protein_length;
+	double raw_degradation_probability = 1 - exp(
+	    -posttranslation_time / degradation_param);
+	double degradation_probability =
+	    one_minus_pnat * raw_degradation_probability;
+
+	if (threefryrand() > degradation_probability)
 	{
-	    folded = 1;
-	}
-	else
-	{
-	    double posttranslation_time =
-		posttranslation_steps / protein_length;
-	    double degradation_probability = 1 - exp(
-		-posttranslation_time / degradation_param);
-	    if (threefryrand() > degradation_probability)
-	    {
-		folded = 1;
-	    }
+	    functional = 1;
 	}
     }
     else
     {
-	last_energy = 0;
+	conf_energy = 0;
     }
 	
-    H5Tclose(strtype);
-    H5Tclose(sequence_attr_t);
-    H5Aclose(sequence_attr);
-    H5Aclose(found_final_attr);
     H5Aclose(last_step_attr);
-    H5Aclose(last_energy_attr);    
+    H5Aclose(conf_fraction_attr);
+    H5Aclose(conf_energy_attr);    
     H5Gclose(group_id);
     H5Fclose(file_id);
 
     if (g_subcomm_rank)
     {
-	// Send whether trajectory folded
-	MPI_Send(&folded, 1, MPI_INT, 0, 0, g_subcomm);
+	// Send whether trajectory generated functional protein
+	MPI_Send(&functional, 1, MPI_INT, 0, 0, g_subcomm);
     }
     else  // root node
     {
-	total_n_folded += folded;
+	total_n_functional += functional;
 	for (int i=1; i<g_subcomm_size; ++i)
 	{
-	    MPI_Recv(&folded, 1, MPI_INT, MPI_ANY_SOURCE, 0,
+	    MPI_Recv(&functional, 1, MPI_INT, MPI_ANY_SOURCE, 0,
 		     g_subcomm, &g_status);
-	    total_n_folded += folded;
+	    total_n_functional += functional;
 	}
     }
-    // Let everyone know total folded
-    MPI_Bcast(&total_n_folded, 1, MPI_INT, 0, g_subcomm);
-    double folded_fraction = total_n_folded / (double)g_subcomm_size;
+    // Let everyone know total functional
+    MPI_Bcast(&total_n_functional, 1, MPI_INT, 0, g_subcomm);
+    double functional_fraction = total_n_functional / (double)g_subcomm_size;
 
     // Also determine native energy
-    MPI_Allreduce(&last_energy, native_energy, 1, MPI_DOUBLE, MPI_MIN,
+    MPI_Allreduce(&conf_energy, native_energy, 1, MPI_DOUBLE, MPI_MIN,
 		  g_subcomm);
     
-    return folded_fraction;
+    return functional_fraction;
 }
 
 
