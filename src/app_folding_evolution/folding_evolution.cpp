@@ -115,7 +115,7 @@ static const int LATPACK_ERROR = 4;
 // default values
 static const int GENS_MAX = 99999;
 static const std::string DEFAULT_LATPACK_PATH =
-    "/n/home00/vzhao/pkg/latPack/1.9.1-10/";
+    "/n/home00/vzhao/pkg/latPack/1.9.1-11/";
 static const std::string DEFAULT_OUTPATH = "./out";
 static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
@@ -333,8 +333,7 @@ int main(int argc, char** argv)
     // Split cpus into two groups
     // world_rank [0, reevaluation_size) does reevaluation
     int reevaluation_size = (int)g_world_size * DEFAULT_REEVALUATION_RATIO;
-    bool proc_does_reevaluation = (g_world_rank < reevaluation_size) ?
-	true : false;
+    bool proc_does_reevaluation = (g_world_rank < reevaluation_size);
     MPI_Comm_split(
 	MPI_COMM_WORLD, proc_does_reevaluation, g_world_rank, &g_subcomm);
     MPI_Comm_rank(g_subcomm, &g_subcomm_rank);
@@ -1393,7 +1392,7 @@ std::vector<std::string> compose_latfoldvec_command(
     command.push_back(latpack_path + "/bin/latFoldVec");
     command.push_back("-energyFile=" + latpack_path + "/share/latpack/MJ.txt");
     command.push_back("-seq=" + aa_sequence);
-    command.push_back("-target=" + folded_conformation);
+    command.push_back("-countTarget=" + folded_conformation);
     command.push_back("-elongationSchedule=" + translation_schedule);
     command.push_back("-kT=" + std::to_string(temperature));
     command.push_back("-maxStepsIncrease");
@@ -1599,8 +1598,8 @@ double evaluate_folded_fraction(
     double conf_energy;
 
     H5Aread(last_step_attr, H5T_NATIVE_ULLONG, &last_step);
-    H5Aread(conf_energy_attr, H5T_NATIVE_DOUBLE, &conf_fraction);
-    H5Aread(conf_fraction_attr, H5T_NATIVE_DOUBLE, &conf_energy);
+    H5Aread(conf_fraction_attr, H5T_NATIVE_DOUBLE, &conf_fraction);
+    H5Aread(conf_energy_attr, H5T_NATIVE_DOUBLE, &conf_energy);
 
     size_t posttranslation_steps = last_step - total_translation_steps;
 
@@ -1614,16 +1613,28 @@ double evaluate_folded_fraction(
 	double degradation_probability =
 	    one_minus_pnat * raw_degradation_probability;
 
+	// // diagnostic
+	// std::cout << filename
+	// 	  << " " << one_minus_pnat
+	// 	  << " " << posttranslation_time
+	// 	  << " " << raw_degradation_probability
+	// 	  << " " << degradation_probability;
+
 	if (threefryrand() > degradation_probability)
 	{
 	    functional = 1;
+	    // std::cout << " " << "functional" << std::endl;
+	}
+	else
+	{
+	    // std::cout << " " << "nonfunctional" << std::endl;
 	}
     }
     else
     {
 	conf_energy = 0;
     }
-	
+
     H5Aclose(last_step_attr);
     H5Aclose(conf_fraction_attr);
     H5Aclose(conf_energy_attr);    

@@ -23,7 +23,7 @@ fi
 
 if [ -f /usr/local/bin/centos7-modules.sh ]; then
     source centos7-modules.sh
-    module add gcc/7.1.0-fasrc01 openmpi/2.1.0-fasrc02 hdf5/1.10.1-fasrc01
+    module add gcc/7.1.0-fasrc01 openmpi/2.1.0-fasrc02 hdf5/1.10.1-fasrc02
 else
     echo "Run this on CentOS 7."
     echo "exiting"
