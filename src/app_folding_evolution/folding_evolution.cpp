@@ -1,9 +1,26 @@
 /* 
- * folding_evolution v0.0.6
+ * folding_evolution v0.0.8
  *
- * v0.0.6 is a major change in how folding simulations are run and
- * fitness is evaluated
- * 
+ * v0.0.7 revises the flawed fitness function 0.0.6
+ * v0.0.7-1 uses the following fitness function:
+ *   fitness = x / x + x_0
+ *   x = average(P_nat * not_degraded)
+ *   where not_degraded is {0, 1} based on whether
+ *     random number r \in [0, 1) > degradation_probability
+ *
+ * v0.0.7-2 uses the following fitness function:
+ *   fitness = x / x + x_0
+ *   x = average(P_nat * (1 - degradation_probability))
+ *   where degradation_probability = 
+ *     1 - exp(-t_sim * (1 - P_nat) / \tau)
+ *
+ * v0.0.7-3 uses the following fitness function:
+ *   fitness = x / x + x_0
+ *   x = average(P_nat * (1 - degradation_probability))
+ *   where degradation_probability = 
+ *     (1 - P_nat)(1 -  exp(-t_sim / \tau)
+ *
+ * v0.0.8 has selected v0.0.7-2. 
  *
  */
 
@@ -81,10 +98,12 @@ static const std::string helptext =
     "  -k, --degradation-param=K Value setting timescale for protein degradation\n"
     "                            (penalizes slow folding/low P_nat).\n"
     "  -l, --latpack-path=PATH   Latpack binaries here. Default=\n"
-    "                            /n/home00/vzhao/pkg/latPack/1.9.1-8/\n"
+    "                            /n/home00/vzhao/pkg/latPack/1.9.1-12/\n"
     "  -m, --mutation-mode=M     One of 0, 1, or 2, indicating restriction to\n"
     "                            synonymous mutation, nonsynonymous mutation,\n"
     "                            or allow both kinds of mutations (default).\n"
+    "      --new-ngens=N         When resuming from checkpoint, change the\n"
+    "                            target number of generations."    
     "  -o, --out-path=FILE       Output will be put in this directory.\n"
     "                            Default=./out\n"
     "  -p, --population-size=N   Size of population for evolutionary\n"
@@ -115,7 +134,7 @@ static const int LATPACK_ERROR = 4;
 // default values
 static const int GENS_MAX = 99999;
 static const std::string DEFAULT_LATPACK_PATH =
-    "/n/home00/vzhao/pkg/latPack/1.9.1-11/";
+    "/n/home00/vzhao/pkg/latPack/1.9.1-12/";
 static const std::string DEFAULT_OUTPATH = "./out";
 static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
@@ -127,6 +146,7 @@ static const double DEFAULT_TEMPERATURE = 0.3;
 static const double DEFAULT_REEVALUATION_RATIO = 0.5; // Not commandline option.
 static const double DEFAULT_FITNESS_CONSTANT = 0.75;
 static const double DEFAULT_DEGRADATION_PARAM = 1000000;
+static const double DEFAULT_POSTTRANSLATION_TIME = 500000;
 
 static const std::vector<Codon> STOP_CODONS = {N_UAA, N_UAG, N_UGA};
 
@@ -344,7 +364,7 @@ int main(int argc, char** argv)
 
     // Required:
     std::string sequence;
-    int n_gens;			// How many generations to run
+    int n_gens = 0;			// How many generations to run
 
     // Other params:
     bool debug_mode = false;
@@ -398,6 +418,7 @@ int main(int argc, char** argv)
 	{"latpack-path", required_argument, NULL, 'l'},
 	{"mutation-mode", required_argument, NULL, 'm'},
 	{"native-fold", required_argument, NULL, 'n'},
+	{"new-ngens", required_argument, NULL, 2},
 	{"random-codons", no_argument, &random_codons, 1},
 	{"out-path", required_argument, NULL, 'o'},
 	{"population-size", required_argument, NULL, 'p'},
@@ -421,10 +442,10 @@ int main(int argc, char** argv)
 	    print_help();
 	    exit(0);
 	case 'f':
-	    // We are resuming from checkpoint. Ignore all other arguments
+	    // We are resuming from checkpoint.
 	    checkpoint_path = optarg;
 	    resume_from_checkpoint = true;
-	    goto checkpoint_breakout;
+	    break;
 	case 'c':
 	    save_conformations = true;
 	    break;
@@ -479,6 +500,20 @@ int main(int argc, char** argv)
 	    break;
 	case 'n':
 	    folded_conformation = optarg;
+	    break;
+	case 2:
+	    try
+	    {
+		n_gens = std::stoi(optarg);
+	    }
+	    catch (...)
+	    {
+		std::ostringstream err;
+		err << "Failed to convert --new-ngens: " << optarg
+		    << std::endl;
+		print_error(err.str(), debug_mode);
+		exit(PARSE_ERROR);
+	    }	    
 	    break;
         case 'o':
             out_path = optarg;
@@ -540,9 +575,6 @@ int main(int argc, char** argv)
 	    print_error(err.str(), debug_mode);
 	    exit(PARSE_ERROR);
 	}
-	continue;
-    checkpoint_breakout:
-	break;
     } // End while getopt_long
 
     // Continued parsing || checkpoint resume
@@ -676,7 +708,14 @@ int main(int argc, char** argv)
 	std::ifstream json_log_file(json_log_path);
 	json_log_file >> json_log;
 	json_log.at("folded conformation").get_to(folded_conformation);
-	json_log.at("generations").get_to(n_gens);
+	if (n_gens == 0)
+	{
+	    json_log.at("generations").get_to(n_gens);
+	}
+	else
+	{
+	    json_log["generations"] = n_gens;
+	}
 	json_log.at("population size").get_to(population_size);
 	json_log.at("temperature").get_to(temperature);
 	json_log.at("simulations per gen").get_to(simulations_per_gen);
@@ -879,6 +918,8 @@ int main(int argc, char** argv)
     // (ribosome release).
     // Set it to be log(8) * tau. (87.5% probability of degradation).
     int posttranslational_folding_time = log(8) * degradation_param;
+    // no, instead we set it to be a fixed value
+    posttranslational_folding_time = DEFAULT_POSTTRANSLATION_TIME;
     int gen = 0;
     int old_total_translation_steps;
     int total_translation_steps;
@@ -1075,7 +1116,7 @@ int main(int argc, char** argv)
 	NucSeqToAASeq(nuc_sequence.data(), nuc_length, aa_sequence.data());
 
 	// Need to save checkpoint
-	if (gen % checkpoint_frequency == 0)
+	if (gen % checkpoint_frequency == 0 || gen == n_gens)
 	{
 	    std::ostringstream checkpoint_path;
 	    checkpoint_path << out_path << "/checkpoint"<< std::setw(5)
@@ -1571,8 +1612,8 @@ double evaluate_folded_fraction(
     double degradation_param,
     double* native_energy)
 {
-    int functional = 0;
-    int total_n_functional = 0;
+    double functional = 0;
+    double total_functional = 0;
 
     // We need to read data from HDF5 file
     hid_t file_id = H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -1603,37 +1644,73 @@ double evaluate_folded_fraction(
 
     size_t posttranslation_steps = last_step - total_translation_steps;
 
+    // diagnostic variables
+    // double pnat_average;
+    // int degraded, degraded_total;
+    // double degrade_average;
+    // end diagnostic variables
+    double degradation_probability;
+
     if (conf_fraction > 0)
     {
 	double one_minus_pnat = 1 - conf_fraction;
 	double posttranslation_time =
-	    posttranslation_steps / protein_length;
-	double raw_degradation_probability = 1 - exp(
-	    -posttranslation_time / degradation_param);
-	double degradation_probability =
-	    one_minus_pnat * raw_degradation_probability;
+	    posttranslation_steps / (double)protein_length;
+	degradation_probability = 1 - exp(
+	    -posttranslation_time * one_minus_pnat / degradation_param);
 
-	// // diagnostic
-	// std::cout << filename
-	// 	  << " " << one_minus_pnat
-	// 	  << " " << posttranslation_time
-	// 	  << " " << raw_degradation_probability
-	// 	  << " " << degradation_probability;
+	// // Version 0.0.7-3
+	// degradation_probability = one_minus_pnat *
+	//     (1 - exp(-posttranslation_time / degradation_param));
 
-	if (threefryrand() > degradation_probability)
-	{
-	    functional = 1;
-	    // std::cout << " " << "functional" << std::endl;
-	}
-	else
-	{
-	    // std::cout << " " << "nonfunctional" << std::endl;
-	}
+	// version 0.0.7-1
+	// if (threefryrand() > degradation_probability)
+	// {
+	//     functional = conf_fraction;
+	//     degraded = 0;
+	// }
+	// else
+	// {
+	//     degraded = 1;
+	// }
+
+	// (0.0.7-{2,3}) we have
+	functional = conf_fraction * (1 - degradation_probability);
+	
     }
     else
     {
 	conf_energy = 0;
     }
+
+    // diagnostic code begin
+    // MPI_Reduce(&conf_fraction, &pnat_average, 1, MPI_DOUBLE, MPI_SUM, 0,
+    // 	       g_subcomm);
+    // MPI_Reduce(&degradation_probability, &degrade_average, 1, MPI_DOUBLE,
+    // 	       MPI_SUM, 0, g_subcomm);
+    // MPI_Reduce(&degraded, &degraded_total, 1, MPI_INT, MPI_SUM, 0,
+    // 	       g_subcomm);
+    // pnat_average /= (double)g_subcomm_size;
+    // degrade_average /= (double)g_subcomm_size;
+    // if (!g_subcomm_rank && !g_world_rank)
+    // {
+    // 	// reevaluators i believe
+    // 	std::cout
+    // 	    << "Reevaluators:"
+    // 	    << degraded_total << " out of " << g_subcomm_size
+    // 	    << " degraded. Degrade average: " << degrade_average
+    // 	    << " Pnat average: " << pnat_average << std::endl;
+    // }
+    // else if (!g_subcomm_rank)
+    // {
+    // 	// new evaluation
+    // 	std::cout
+    // 	    << "New evaluate:"
+    // 	    << degraded_total << " out of " << g_subcomm_size
+    // 	    << " degraded. Degrade average: " << degrade_average
+    // 	    << " Pnat average: " << pnat_average << std::endl;
+    // }
+    // diagnostic code end
 
     H5Aclose(last_step_attr);
     H5Aclose(conf_fraction_attr);
@@ -1641,24 +1718,9 @@ double evaluate_folded_fraction(
     H5Gclose(group_id);
     H5Fclose(file_id);
 
-    if (g_subcomm_rank)
-    {
-	// Send whether trajectory generated functional protein
-	MPI_Send(&functional, 1, MPI_INT, 0, 0, g_subcomm);
-    }
-    else  // root node
-    {
-	total_n_functional += functional;
-	for (int i=1; i<g_subcomm_size; ++i)
-	{
-	    MPI_Recv(&functional, 1, MPI_INT, MPI_ANY_SOURCE, 0,
-		     g_subcomm, &g_status);
-	    total_n_functional += functional;
-	}
-    }
-    // Let everyone know total functional
-    MPI_Bcast(&total_n_functional, 1, MPI_INT, 0, g_subcomm);
-    double functional_fraction = total_n_functional / (double)g_subcomm_size;
+    MPI_Allreduce(&functional, &total_functional, 1, MPI_DOUBLE,
+		  MPI_SUM, g_subcomm);
+    double functional_fraction = total_functional / (double)g_subcomm_size;
 
     // Also determine native energy
     MPI_Allreduce(&conf_energy, native_energy, 1, MPI_DOUBLE, MPI_MIN,
@@ -1673,6 +1735,7 @@ double calculate_fitness(
     double folded_fraction,
     double f_0)
 {
+    // 0.001 to avoid divide by zero error
     return 0.001 + folded_fraction / (folded_fraction + f_0);    
 }
 
@@ -1711,8 +1774,8 @@ void print_header(
     *outstream << shorten("AA sequence", aa_sequence.size()) << "|";
     *outstream << shorten("Nuc sequence", nuc_sequence.size()) << "|";
     *outstream << 
-	std::setw(8) << "Old fit." << "|" <<
-	std::setw(8) << "New fit." << "|" <<
+	std::setw(7) << "Old fit" << "|" <<
+	std::setw(7) << "New fit" << "|" <<
 	std::setw(7) << "Nat. E." << "|" <<
 	std::setw(6) << "Accept"
 	       << std::endl;
@@ -1720,7 +1783,7 @@ void print_header(
     int line_length = 4;
     line_length += aa_sequence.size() + 1;
     line_length += nuc_sequence.size() + 1;
-    line_length += 23 + 3;
+    line_length += 21 + 3;
     line_length += 6;
 
     *outstream << "# " << std::string(line_length, '-')<< std::endl;
@@ -1753,8 +1816,8 @@ void print_state(
 	       << std::setw(5) << generation << " "
 	       << std::setw(aa_seq_len) << aa_seq_str.get() << " "
 	       << std::setw(nuc_seq_len) << nuc_seq_str.get() << " "
-	       << std::setw(8) << old_fitness << " "
-	       << std::setw(8) << new_fitness << " "
+	       << std::setw(7) << old_fitness << " "
+	       << std::setw(7) << new_fitness << " "
 	       << std::setw(7) << native_energy << " "	
 	       << std::setw(6) << ((accept) ? "yes" : "no")
 	       << std::endl;
