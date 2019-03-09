@@ -1,26 +1,8 @@
 /* 
- * folding_evolution v0.0.8
+ * folding_evolution v0.0.9
  *
- * v0.0.7 revises the flawed fitness function 0.0.6
- * v0.0.7-1 uses the following fitness function:
- *   fitness = x / x + x_0
- *   x = average(P_nat * not_degraded)
- *   where not_degraded is {0, 1} based on whether
- *     random number r \in [0, 1) > degradation_probability
- *
- * v0.0.7-2 uses the following fitness function:
- *   fitness = x / x + x_0
- *   x = average(P_nat * (1 - degradation_probability))
- *   where degradation_probability = 
- *     1 - exp(-t_sim * (1 - P_nat) / \tau)
- *
- * v0.0.7-3 uses the following fitness function:
- *   fitness = x / x + x_0
- *   x = average(P_nat * (1 - degradation_probability))
- *   where degradation_probability = 
- *     (1 - P_nat)(1 -  exp(-t_sim / \tau)
- *
- * v0.0.8 has selected v0.0.7-2. 
+ * v0.0.9 uses a fitness function with a better way of looking at
+ * degradation and enzyme output.
  *
  */
 
@@ -98,7 +80,7 @@ static const std::string helptext =
     "  -k, --degradation-param=K Value setting timescale for protein degradation\n"
     "                            (penalizes slow folding/low P_nat).\n"
     "  -l, --latpack-path=PATH   Latpack binaries here. Default=\n"
-    "                            /n/home00/vzhao/pkg/latPack/1.9.1-12/\n"
+    "                            /n/home00/vzhao/pkg/latPack/1.9.1-13/\n"
     "  -m, --mutation-mode=M     One of 0, 1, or 2, indicating restriction to\n"
     "                            synonymous mutation, nonsynonymous mutation,\n"
     "                            or allow both kinds of mutations (default).\n"
@@ -134,7 +116,7 @@ static const int LATPACK_ERROR = 4;
 // default values
 static const int GENS_MAX = 99999;
 static const std::string DEFAULT_LATPACK_PATH =
-    "/n/home00/vzhao/pkg/latPack/1.9.1-12/";
+    "/n/home00/vzhao/pkg/latPack/1.9.1-13/";
 static const std::string DEFAULT_OUTPATH = "./out";
 static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
@@ -222,9 +204,10 @@ std::vector<std::string> compose_latfoldvec_command(
     const std::string& aa_sequence,
     const std::string& folded_conformation,
     const std::string& translation_schedule,
-    const int& full_length_time,
-    const double& temperature,
-    const int& output_frequency,
+    int full_length_time,
+    double temperature,
+    int output_frequency,
+    double degradation_scale,
     bool save_conformations);
 
 
@@ -264,35 +247,33 @@ void run_latfoldvec(
 // @param degradation_param Timescale that unfolded protein degradation
 //        acts on.
 // @param native_energy Value is updated with native energy.
-double evaluate_folded_fraction(
+double get_survival_sum_avg(
     const std::string& filename,
-    int total_translation_steps,
-    double degradation_param,
     double* native_energy);
 
 
-// Calculate fitness from folded fraction.
+// Calculate fitness from protein output.
 //
-// @param folded_fraction The fraction of successful folding
+// @param protein_output The fraction of successful folding
 //        simulations
 // @param f_0 Fitness function parameter
 double calculate_fitness(
-    double folded_fraction,
+    double protein_output,
     double f_0=DEFAULT_FITNESS_CONSTANT);
 
 
-// Update folded fraction to incorporate new folding simulations.
+// Update protein output to incorporate new folding simulations.
 //
-// @param old_folded_fraction The previously estimated folded fraction.
-// @param new_folded_fraction The newly estimated folded fraction.
+// @param old_protein_output The previously estimated protein output.
+// @param new_protein_output The newly estimated protein output.
 // @param n_reevaluators The number of simulations run to estimate
 //        the new fitness value.
 // @param n_total The total number of CPUs running simulations.
 // @param n_gens_without_accept Number of generations since last
 //        accepted mutation.
-double reaverage_folded_fraction(
-    double old_folded_fraction,
-    double new_folded_fraction,
+double reaverage_protein_output(
+    double old_protein_output,
+    double new_protein_output,
     int n_reevaluators,
     int n_total,
     int n_gens_without_accept);
@@ -327,8 +308,8 @@ void save_state(
     std::vector<int> & nuc_sequence,
     double old_fitness,
     double new_fitness,
-    double old_folded_fraction,
-    double new_folded_fraction,
+    double old_protein_output,
+    double new_protein_output,
     double native_energy,
     bool accept);
 
@@ -920,6 +901,7 @@ int main(int argc, char** argv)
     int posttranslational_folding_time = log(8) * degradation_param;
     // no, instead we set it to be a fixed value
     posttranslational_folding_time = DEFAULT_POSTTRANSLATION_TIME;
+    double degradation_scale_steps = degradation_param * protein_length;
     int gen = 0;
     int old_total_translation_steps;
     int total_translation_steps;
@@ -928,8 +910,8 @@ int main(int argc, char** argv)
     int mutation_type = -1;
     double old_fitness = 0.001;
     double fitness;
-    double old_folded_fraction = 0;
-    double folded_fraction;
+    double old_protein_output = 0;
+    double protein_output;
     double native_energy;
     double selection;
     double fixation;
@@ -949,7 +931,7 @@ int main(int argc, char** argv)
 	    n_gens_without_accept);
 	checkpoint.at("mutation type").get_to(mutation_type);
 	checkpoint.at("old fitness").get_to(old_fitness);
-	checkpoint.at("old folded fraction").get_to(old_folded_fraction);
+	checkpoint.at("old protein output").get_to(old_protein_output);
 	checkpoint.at("prev latfoldvec command").get_to(
 	    prev_latfoldvec_command);
     }
@@ -976,6 +958,7 @@ int main(int argc, char** argv)
 	    posttranslational_folding_time,
 	    temperature,
 	    latfold_output_frequency,
+	    degradation_scale_steps,
 	    save_conformations);
 
 	if (proc_does_reevaluation && gen > 0)
@@ -989,15 +972,14 @@ int main(int argc, char** argv)
 			     << "_" << std::setw(5) << g_subcomm_rank << ".h5";
 
 	    run_latfoldvec(prev_latfoldvec_command, hdf5_output_file.str());
-	    folded_fraction = evaluate_folded_fraction(
-		hdf5_output_file.str(), old_total_translation_steps,
-		degradation_param, &native_energy);
+	    protein_output = get_survival_sum_avg(
+		hdf5_output_file.str(), &native_energy);
 
 	    // Now update old fitness
-	    old_folded_fraction = reaverage_folded_fraction(
-		old_folded_fraction, folded_fraction, g_subcomm_size,
+	    old_protein_output = reaverage_protein_output(
+		old_protein_output, protein_output, g_subcomm_size,
 		g_world_size, n_gens_without_accept);
-	    old_fitness = calculate_fitness(old_folded_fraction);
+	    old_fitness = calculate_fitness(old_protein_output);
 	}
 	else if (!proc_does_reevaluation)
 	{
@@ -1028,16 +1010,15 @@ int main(int argc, char** argv)
 			     << "_" << std::setw(5) << g_subcomm_rank << ".h5";
 
 	    run_latfoldvec(latfoldvec_command, hdf5_output_file.str());
-	    folded_fraction = evaluate_folded_fraction(
-		hdf5_output_file.str(), total_translation_steps,
-		degradation_param, &native_energy);
-	    fitness = calculate_fitness(folded_fraction);
+	    protein_output = get_survival_sum_avg(
+		hdf5_output_file.str(), &native_energy);
+	    fitness = calculate_fitness(protein_output);
 	}
 	MPI_Bcast(&native_energy, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
 	MPI_Bcast(&fitness, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
-	MPI_Bcast(&folded_fraction, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
+	MPI_Bcast(&protein_output, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
 	MPI_Bcast(&old_fitness, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-	MPI_Bcast(&old_folded_fraction, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	MPI_Bcast(&old_protein_output, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
 	selection = (fitness / old_fitness) - 1;
 	if (selection == 0.)
@@ -1061,7 +1042,7 @@ int main(int argc, char** argv)
 			fitness, native_energy, accept);
 	    save_state(json_log, gen, n_gens_without_accept, mutation_type,
 		       aa_sequence, nuc_sequence, old_fitness, fitness,
-		       old_folded_fraction, folded_fraction, native_energy,
+		       old_protein_output, protein_output, native_energy,
 		       (bool)accept);
 	    if (gen % DEFAULT_JSON_OUTFREQ == 0)
 	    {
@@ -1079,7 +1060,7 @@ int main(int argc, char** argv)
 	    prev_nuc_sequence = nuc_sequence;
 	    prev_latfoldvec_command = latfoldvec_command;
 	    old_total_translation_steps = total_translation_steps;
-	    old_folded_fraction = folded_fraction;
+	    old_protein_output = protein_output;
 	    old_fitness = fitness;
 	    n_gens_without_accept = 0;
 	    last_accepted_gen = gen;
@@ -1133,8 +1114,8 @@ int main(int argc, char** argv)
 		n_gens_without_accept;
 	    checkpoint["mutation type"] = mutation_type;
 	    checkpoint["old fitness"] = old_fitness;
-	    checkpoint["old folded fraction"]
-		= old_folded_fraction;
+	    checkpoint["old protein output"]
+		= old_protein_output;
 	    checkpoint["prev latfoldvec command"] = prev_latfoldvec_command;
 	    write_checkpoint(checkpoint_path.str(), checkpoint);
 	}
@@ -1423,9 +1404,10 @@ std::vector<std::string> compose_latfoldvec_command(
     const std::string& aa_sequence,
     const std::string& folded_conformation,
     const std::string& translation_schedule,
-    const int& full_length_time,
-    const double& temperature,
-    const int& output_frequency,
+    int full_length_time,
+    double temperature,
+    int output_frequency,
+    double degradation_scale,	// in steps
     bool save_conformations)
 {
     std::vector<std::string> command;
@@ -1434,6 +1416,7 @@ std::vector<std::string> compose_latfoldvec_command(
     command.push_back("-energyFile=" + latpack_path + "/share/latpack/MJ.txt");
     command.push_back("-seq=" + aa_sequence);
     command.push_back("-countTarget=" + folded_conformation);
+    command.push_back("-targetDegradationScale=" + std::to_string(degradation_scale));
     command.push_back("-elongationSchedule=" + translation_schedule);
     command.push_back("-kT=" + std::to_string(temperature));
     command.push_back("-maxStepsIncrease");
@@ -1606,10 +1589,8 @@ void run_latfoldvec(
 
 // Analyze latFoldVec simulations to determine a fitness value for
 // protein under evaluation.
-double evaluate_folded_fraction(
+double get_survival_sum_avg(
     const std::string& filename,
-    int total_translation_steps,
-    double degradation_param,
     double* native_energy)
 {
     double functional = 0;
@@ -1619,131 +1600,58 @@ double evaluate_folded_fraction(
     hid_t file_id = H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
     hid_t group_id = H5Gopen2(file_id, "traj1", H5P_DEFAULT);
 
-    // Get protein length
-    hid_t sequence_attr = H5Aopen(file_id, "Sequence", H5P_DEFAULT);
-    hid_t sequence_attr_t = H5Aget_type(sequence_attr);
-    size_t sequence_attr_size = H5Tget_size(sequence_attr_t);
-    size_t protein_length = sequence_attr_size - 1;
-    H5Tclose(sequence_attr_t);
-    H5Aclose(sequence_attr);
+    // // Get protein length
+    // hid_t sequence_attr = H5Aopen(file_id, "Sequence", H5P_DEFAULT);
+    // hid_t sequence_attr_t = H5Aget_type(sequence_attr);
+    // size_t sequence_attr_size = H5Tget_size(sequence_attr_t);
+    // size_t protein_length = sequence_attr_size - 1;
+    // H5Tclose(sequence_attr_t);
+    // H5Aclose(sequence_attr);
 
-    // Read three relevant attributes from 'traj1'
-    hid_t last_step_attr = H5Aopen(group_id, "Last step",
-				   H5P_DEFAULT);
-    hid_t conf_fraction_attr = H5Aopen(group_id, "Fraction target conf",
-				       H5P_DEFAULT);
+    // Read two relevant attributes from 'traj1'
+    hid_t survival_sum_attr = H5Aopen(group_id, "Survival sum fraction",
+				      H5P_DEFAULT);
     hid_t conf_energy_attr = H5Aopen(group_id, "Target conf energy",
 				     H5P_DEFAULT);
-    size_t last_step;
-    double conf_fraction;
-    double conf_energy;
+    double survival_sum;
+    double conf_energy = 0;
 
-    H5Aread(last_step_attr, H5T_NATIVE_ULLONG, &last_step);
-    H5Aread(conf_fraction_attr, H5T_NATIVE_DOUBLE, &conf_fraction);
+    H5Aread(survival_sum_attr, H5T_NATIVE_DOUBLE, &survival_sum);
     H5Aread(conf_energy_attr, H5T_NATIVE_DOUBLE, &conf_energy);
 
-    size_t posttranslation_steps = last_step - total_translation_steps;
+    functional = survival_sum;
 
-    // diagnostic variables
-    // double pnat_average;
-    // int degraded, degraded_total;
-    // double degrade_average;
-    // end diagnostic variables
-    double degradation_probability;
-
-    if (conf_fraction > 0)
-    {
-	double one_minus_pnat = 1 - conf_fraction;
-	double posttranslation_time =
-	    posttranslation_steps / (double)protein_length;
-	degradation_probability = 1 - exp(
-	    -posttranslation_time * one_minus_pnat / degradation_param);
-
-	// // Version 0.0.7-3
-	// degradation_probability = one_minus_pnat *
-	//     (1 - exp(-posttranslation_time / degradation_param));
-
-	// version 0.0.7-1
-	// if (threefryrand() > degradation_probability)
-	// {
-	//     functional = conf_fraction;
-	//     degraded = 0;
-	// }
-	// else
-	// {
-	//     degraded = 1;
-	// }
-
-	// (0.0.7-{2,3}) we have
-	functional = conf_fraction * (1 - degradation_probability);
-	
-    }
-    else
-    {
-	conf_energy = 0;
-    }
-
-    // diagnostic code begin
-    // MPI_Reduce(&conf_fraction, &pnat_average, 1, MPI_DOUBLE, MPI_SUM, 0,
-    // 	       g_subcomm);
-    // MPI_Reduce(&degradation_probability, &degrade_average, 1, MPI_DOUBLE,
-    // 	       MPI_SUM, 0, g_subcomm);
-    // MPI_Reduce(&degraded, &degraded_total, 1, MPI_INT, MPI_SUM, 0,
-    // 	       g_subcomm);
-    // pnat_average /= (double)g_subcomm_size;
-    // degrade_average /= (double)g_subcomm_size;
-    // if (!g_subcomm_rank && !g_world_rank)
-    // {
-    // 	// reevaluators i believe
-    // 	std::cout
-    // 	    << "Reevaluators:"
-    // 	    << degraded_total << " out of " << g_subcomm_size
-    // 	    << " degraded. Degrade average: " << degrade_average
-    // 	    << " Pnat average: " << pnat_average << std::endl;
-    // }
-    // else if (!g_subcomm_rank)
-    // {
-    // 	// new evaluation
-    // 	std::cout
-    // 	    << "New evaluate:"
-    // 	    << degraded_total << " out of " << g_subcomm_size
-    // 	    << " degraded. Degrade average: " << degrade_average
-    // 	    << " Pnat average: " << pnat_average << std::endl;
-    // }
-    // diagnostic code end
-
-    H5Aclose(last_step_attr);
-    H5Aclose(conf_fraction_attr);
+    H5Aclose(survival_sum_attr);
     H5Aclose(conf_energy_attr);    
     H5Gclose(group_id);
     H5Fclose(file_id);
 
     MPI_Allreduce(&functional, &total_functional, 1, MPI_DOUBLE,
 		  MPI_SUM, g_subcomm);
-    double functional_fraction = total_functional / (double)g_subcomm_size;
+    double survival_average = total_functional / (double)g_subcomm_size;
 
     // Also determine native energy
     MPI_Allreduce(&conf_energy, native_energy, 1, MPI_DOUBLE, MPI_MIN,
 		  g_subcomm);
     
-    return functional_fraction;
+    return survival_average;
 }
 
 
-// Calculate fitness from folded fraction.
+// Calculate fitness from protein output.
 double calculate_fitness(
-    double folded_fraction,
+    double protein_output,
     double f_0)
 {
     // 0.001 to avoid divide by zero error
-    return 0.001 + folded_fraction / (folded_fraction + f_0);    
+    return 0.001 + protein_output / (protein_output + f_0);    
 }
 
 
-// Update folded fraction to incorporate new folding simulations.
-double reaverage_folded_fraction(
-    double old_folded_fraction,
-    double new_folded_fraction,
+// Update protein output to incorporate new folding simulations.
+double reaverage_protein_output(
+    double old_protein_output,
+    double new_protein_output,
     int n_reevaluators,
     int n_total,
     int n_gens_without_accept)
@@ -1753,7 +1661,7 @@ double reaverage_folded_fraction(
 	/ (double)(n_total + n_gens_without_accept * n_reevaluators);
     double new_factor = n_reevaluators
 	/ (double)(n_total + n_gens_without_accept * n_reevaluators);
-    return old_folded_fraction * old_factor + new_folded_fraction * new_factor;
+    return old_protein_output * old_factor + new_protein_output * new_factor;
 }
 
 
@@ -1836,8 +1744,8 @@ void save_state(
     std::vector<int> & nuc_sequence,
     double old_fitness,
     double new_fitness,
-    double old_folded_fraction,
-    double new_folded_fraction,
+    double old_protein_output,
+    double new_protein_output,
     double native_energy,
     bool accept)
 {
@@ -1851,6 +1759,10 @@ void save_state(
     int n_evaluations =
 	n_gens_without_accept * (int)json_log["reevaluation size"]
 	+ (int)json_log["simulations per gen"];
+    if (generation == 0)
+    {
+	n_evaluations = 0;
+    }
 
     json entry;
     entry["generation"] = generation;
@@ -1860,8 +1772,8 @@ void save_state(
     entry["nuc sequence"] = nuc_seq_str.get();
     entry["old fitness"] = old_fitness;
     entry["new fitness"] = new_fitness;
-    entry["old folded fraction"] = old_folded_fraction;
-    entry["new folded fraction"] = new_folded_fraction;
+    entry["old protein output"] = old_protein_output;
+    entry["new protein output"] = new_protein_output;
     entry["native energy"] = native_energy;
     entry["accepted"] = accept;
     json_log["trajectory"].push_back(entry);
