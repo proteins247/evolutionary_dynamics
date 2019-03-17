@@ -1,8 +1,7 @@
 /* 
- * folding_evolution v0.0.9
+ * folding_evolution v0.0.10
  *
- * v0.0.9 uses a fitness function with a better way of looking at
- * degradation and enzyme output.
+ * v0.0.10
  *
  */
 
@@ -21,6 +20,7 @@
 
 #include <getopt.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -74,13 +74,10 @@ static const std::string helptext =
     "                            as a latPack-style move sequence.\n"
     "  -s, --speed-params=FILE   REQUIRED. Path to file with translation\n"
     "                            times of the codons.\n"
-    "  -c, --save-conformations  Save latFoldVec simulation conformations.\n"
     "  -d, --debug               Allow error messages from all processors.\n"
     "  -f, --from-checkpoint     Resume simulation from checkpoint file.\n"
     "  -k, --degradation-param=K Value setting timescale for protein degradation\n"
     "                            (penalizes slow folding/low P_nat).\n"
-    "  -l, --latpack-path=PATH   Latpack binaries here. Default=\n"
-    "                            /n/home00/vzhao/pkg/latPack/1.9.1-13/\n"
     "  -m, --mutation-mode=M     One of 0, 1, or 2, indicating restriction to\n"
     "                            synonymous mutation, nonsynonymous mutation,\n"
     "                            or allow both kinds of mutations (default).\n"
@@ -115,8 +112,6 @@ static const int LATPACK_ERROR = 4;
 
 // default values
 static const int GENS_MAX = 99999;
-static const std::string DEFAULT_LATPACK_PATH =
-    "/n/home00/vzhao/pkg/latPack/1.9.1-13/";
 static const std::string DEFAULT_OUTPATH = "./out";
 static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
@@ -200,15 +195,13 @@ std::string make_translation_schedule(
 // Build a vector of strings that are arguments to invoke
 // latFoldVec. Note arguments -seed and -outFile are not added here.
 std::vector<std::string> compose_latfoldvec_command(
-    const std::string& latpack_path,
     const std::string& aa_sequence,
     const std::string& folded_conformation,
     const std::string& translation_schedule,
     int full_length_time,
     double temperature,
     int output_frequency,
-    double degradation_scale,
-    bool save_conformations);
+    double degradation_scale);
 
 
 // Use vfork and exec to run a latFoldVec co-translational folding
@@ -349,14 +342,12 @@ int main(int argc, char** argv)
 
     // Other params:
     bool debug_mode = false;
-    bool save_conformations = false;
     bool resume_from_checkpoint = false;
     bool instant_ribosome_release = false;
     int random_codons = 0;
     int population_size = DEFAULT_POPULATION_SIZE;
     std::string folded_conformation;
     std::string speedparams_path;
-    std::string latpack_path = DEFAULT_LATPACK_PATH;
     std::string out_path = DEFAULT_OUTPATH;
     std::string checkpoint_path;
     std::string lat_sim_out_path;
@@ -396,7 +387,6 @@ int main(int argc, char** argv)
     static struct option long_options[] = {
 	{"from-checkpoint", required_argument, NULL, 'f'},
 	{"degradation-param", required_argument, NULL, 'k'},
-	{"latpack-path", required_argument, NULL, 'l'},
 	{"mutation-mode", required_argument, NULL, 'm'},
 	{"native-fold", required_argument, NULL, 'n'},
 	{"new-ngens", required_argument, NULL, 2},
@@ -406,14 +396,13 @@ int main(int argc, char** argv)
 	{"seed", required_argument, NULL, 'r'},
 	{"speed-params", required_argument, NULL, 's'},
 	{"temperature", required_argument, NULL, 't'},
-	{"save-conformations", no_argument, NULL, 'c'},
 	{"debug", no_argument, NULL, 'd'},
 	{"help", no_argument, NULL, 'h'},
 	{"instant-release", no_argument, NULL, 'z'},
 	{NULL, 0, NULL, 0}
     };
 
-    while ((c = getopt_long(argc, argv, "f:k:l:m:n:o:p:r:s:t:cdhz",
+    while ((c = getopt_long(argc, argv, "f:k:m:n:o:p:r:s:t:dhz",
 			    long_options, &option_index))
 	   != -1)
     {
@@ -426,9 +415,6 @@ int main(int argc, char** argv)
 	    // We are resuming from checkpoint.
 	    checkpoint_path = optarg;
 	    resume_from_checkpoint = true;
-	    break;
-	case 'c':
-	    save_conformations = true;
 	    break;
 	case 'd':
 	    debug_mode = true;
@@ -448,9 +434,6 @@ int main(int argc, char** argv)
 		print_error(err.str(), debug_mode);
 		exit(PARSE_ERROR);
 	    }
-	    break;
-	case 'l':
-	    latpack_path = optarg;
 	    break;
 	case 'm':
 	    try
@@ -702,11 +685,38 @@ int main(int argc, char** argv)
 	json_log.at("simulations per gen").get_to(simulations_per_gen);
 	json_log.at("reevaluation size").get_to(checkpoint_reevaluation_size);
 	json_log.at("degradation timescale").get_to(degradation_param);
-	json_log.at("latpack path").get_to(latpack_path);
+	std::string latpack_share_path;
+	std::string current_latpack_share_path(getenv("LATPACK_SHARE"));
+	json_log.at("latpack share path").get_to(latpack_share_path);
+	std::string foldevo_share_path;
+	std::string current_foldevo_share_path(getenv("FOLDEVO_SHARE"));
+	json_log.at("foldevo share path").get_to(foldevo_share_path);
 	json_log.at("translation params").get_to(speedparams_path);
 	json_log.at("instant ribosome release").get_to(
 	    instant_ribosome_release);
 	json_log.at("mutation mode").get_to(mutation_mode);
+
+	if (latpack_share_path != current_latpack_share_path)
+	{
+	    std::cerr << "Current LATPACK_SHARE and checkpoint LATPACK_SHARE "
+		      << "do not match.\n"
+		      << current_latpack_share_path << std::endl
+		      << " vs\n"
+		      << latpack_share_path << std::endl;
+	    std::cerr << "Use right latpack version.\n";
+	    exit(DATA_ERROR);
+	}
+
+	if (foldevo_share_path != current_foldevo_share_path)
+	{
+	    std::cerr << "Current FOLDEVO_SHARE and checkpoint FOLDEVO_SHARE "
+		      << "do not match.\n"
+		      << current_foldevo_share_path << std::endl
+		      << " vs\n"
+		      << foldevo_share_path << std::endl;
+	    std::cerr << "Use right foldevo version.\n";
+	    exit(DATA_ERROR);
+	}
 
 	// Check that simulations_per_gen agrees with number of processors
 	if (simulations_per_gen != g_world_size)
@@ -869,7 +879,8 @@ int main(int argc, char** argv)
 	    json_log["simulations per gen"] = g_world_size;
 	    json_log["reevaluation size"] = reevaluation_size;
 	    json_log["degradation timescale"] = degradation_param;
-	    json_log["latpack path"] = latpack_path;
+	    json_log["latpack share path"] = getenv("LATPACK_SHARE");
+	    json_log["foldevo share path"] = getenv("FOLDEVO_SHARE");
 	    json_log["translation params"] = speedparams_path;
 	    json_log["instant ribosome release"] = instant_ribosome_release;
 	    json_log["rng seed"] = rng_seed;
@@ -888,6 +899,7 @@ int main(int argc, char** argv)
 	    << "# degradation timescale : " << degradation_param << std::endl
 	    << "# rng seed : " << rng_seed << std::endl
 	    << "# translation params : " << speedparams_path << std::endl
+	    << "# latpack share : " << getenv("LATPACK_SHARE") << std::endl
 	    ;
 	print_header(outstream, aa_sequence, nuc_sequence); 
     }
@@ -951,15 +963,13 @@ int main(int argc, char** argv)
 	PrintAASequence(
 	    aa_sequence_str.get(), aa_sequence.data(), protein_length);
 	latfoldvec_command = compose_latfoldvec_command(
-	    latpack_path,
 	    aa_sequence_str.get(),
 	    folded_conformation,
 	    translation_schedule,
 	    posttranslational_folding_time,
 	    temperature,
 	    latfold_output_frequency,
-	    degradation_scale_steps,
-	    save_conformations);
+	    degradation_scale_steps);
 
 	if (proc_does_reevaluation && gen > 0)
 	{
@@ -1400,20 +1410,19 @@ std::string make_translation_schedule(
 // Build a vector of strings that are arguments to invoke
 // latFoldVec. Note arguments -seed and -outFile are not added here.
 std::vector<std::string> compose_latfoldvec_command(
-    const std::string& latpack_path,
     const std::string& aa_sequence,
     const std::string& folded_conformation,
     const std::string& translation_schedule,
     int full_length_time,
     double temperature,
     int output_frequency,
-    double degradation_scale,	// in steps
-    bool save_conformations)
+    double degradation_scale)	// in steps
 {
     std::vector<std::string> command;
 
-    command.push_back(latpack_path + "/bin/latFoldVec");
-    command.push_back("-energyFile=" + latpack_path + "/share/latpack/MJ.txt");
+    command.push_back("latFoldVec");
+    std::string energyFileArg(getenv("LATPACK_SHARE"));
+    command.push_back("-energyFile=" + energyFileArg + "/MJ.txt");
     command.push_back("-seq=" + aa_sequence);
     command.push_back("-countTarget=" + folded_conformation);
     command.push_back("-targetDegradationScale=" + std::to_string(degradation_scale));
@@ -1424,14 +1433,15 @@ std::vector<std::string> compose_latfoldvec_command(
     command.push_back("-ribosomeRelease");
     command.push_back("-fullLengthSteps=" + std::to_string(full_length_time));
     command.push_back("-outFreq=" + std::to_string(output_frequency));
-    if (save_conformations)
-    {
-	command.push_back("-out=S");
-    }
-    else
-    {
-	command.push_back("-out=E");
-    }
+    command.push_back("-out=S");
+    // if (save_conformations)
+    // {
+    //     command.push_back("-out=S");
+    // }
+    // else
+    // {
+    // 	command.push_back("-out=E");
+    // }
     
     // Previously we did the what is commented out, but we want to
     // keep the command as a vector.
@@ -1643,8 +1653,8 @@ double calculate_fitness(
     double protein_output,
     double f_0)
 {
-    // 0.001 to avoid divide by zero error
-    return 0.001 + protein_output / (protein_output + f_0);    
+    // 0.0001 to avoid divide by zero error
+    return 0.0001 + protein_output / (protein_output + f_0);    
 }
 
 
