@@ -1,7 +1,7 @@
 /* 
- * folding_evolution v0.0.10
+ * folding_evolution v0.0.11
  *
- * v0.0.10
+ * v0.0.11
  *
  */
 
@@ -124,6 +124,7 @@ static const double DEFAULT_REEVALUATION_RATIO = 0.5; // Not commandline option.
 static const double DEFAULT_FITNESS_CONSTANT = 0.75;
 static const double DEFAULT_DEGRADATION_PARAM = 1000000;
 static const double DEFAULT_POSTTRANSLATION_TIME = 500000;
+static const double DEFAULT_CELL_TIME = DEFAULT_POSTTRANSLATION_TIME * 100;
 
 static const std::vector<Codon> STOP_CODONS = {N_UAA, N_UAG, N_UGA};
 
@@ -231,8 +232,8 @@ void run_latfoldvec(
 //     int n_simulations=1);
 
 
-// Analyze latFoldVec simulations to count number of successful
-// simulations. This is a parallel function.
+// Analyze latFoldVec simulations to average protein output.
+// This is a parallel function.
 //
 // @param filename The partial name of the file hdf5 output was
 //        written to.
@@ -240,9 +241,11 @@ void run_latfoldvec(
 // @param degradation_param Timescale that unfolded protein degradation
 //        acts on.
 // @param native_energy Value is updated with native energy.
-double get_survival_sum_avg(
+double get_protein_output_avg(
     const std::string& filename,
-    double* native_energy);
+    double* native_energy,
+    double degradation_param,
+    double t_cell=DEFAULT_CELL_TIME);
 
 
 // Calculate fitness from protein output.
@@ -982,8 +985,8 @@ int main(int argc, char** argv)
 			     << "_" << std::setw(5) << g_subcomm_rank << ".h5";
 
 	    run_latfoldvec(prev_latfoldvec_command, hdf5_output_file.str());
-	    protein_output = get_survival_sum_avg(
-		hdf5_output_file.str(), &native_energy);
+	    protein_output = get_protein_output_avg(
+		hdf5_output_file.str(), &native_energy, degradation_param);
 
 	    // Now update old fitness
 	    old_protein_output = reaverage_protein_output(
@@ -1020,8 +1023,8 @@ int main(int argc, char** argv)
 			     << "_" << std::setw(5) << g_subcomm_rank << ".h5";
 
 	    run_latfoldvec(latfoldvec_command, hdf5_output_file.str());
-	    protein_output = get_survival_sum_avg(
-		hdf5_output_file.str(), &native_energy);
+	    protein_output = get_protein_output_avg(
+		hdf5_output_file.str(), &native_energy, degradation_param);
 	    fitness = calculate_fitness(protein_output);
 	}
 	MPI_Bcast(&native_energy, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
@@ -1597,14 +1600,16 @@ void run_latfoldvec(
 
 
 
-// Analyze latFoldVec simulations to determine a fitness value for
-// protein under evaluation.
-double get_survival_sum_avg(
+// Analyze latFoldVec simulations to average protein output.
+// This is a parallel function.
+double get_protein_output_avg(
     const std::string& filename,
-    double* native_energy)
+    double* native_energy,
+    double degradation_param,
+    double t_cell)
 {
-    double functional = 0;
-    double total_functional = 0;
+    double output = 0;
+    double total_output = 0;
 
     // We need to read data from HDF5 file
     hid_t file_id = H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -1619,32 +1624,36 @@ double get_survival_sum_avg(
     // H5Aclose(sequence_attr);
 
     // Read two relevant attributes from 'traj1'
-    hid_t survival_sum_attr = H5Aopen(group_id, "Survival sum fraction",
-				      H5P_DEFAULT);
+    hid_t output_attr = H5Aopen(group_id, "Protein output",
+				H5P_DEFAULT);
+    hid_t pnat_attr = H5Aopen(group_id, "Fraction target conf",
+			      H5P_DEFAULT);
     hid_t conf_energy_attr = H5Aopen(group_id, "Target conf energy",
 				     H5P_DEFAULT);
-    double survival_sum;
     double conf_energy = 0;
+    double pnat = 0;
 
-    H5Aread(survival_sum_attr, H5T_NATIVE_DOUBLE, &survival_sum);
+    H5Aread(output_attr, H5T_NATIVE_DOUBLE, &output);
+    H5Aread(pnat_attr, H5T_NATIVE_DOUBLE, &pnat);
     H5Aread(conf_energy_attr, H5T_NATIVE_DOUBLE, &conf_energy);
 
-    functional = survival_sum;
-
-    H5Aclose(survival_sum_attr);
+    H5Aclose(output_attr);
     H5Aclose(conf_energy_attr);    
     H5Gclose(group_id);
     H5Fclose(file_id);
 
-    MPI_Allreduce(&functional, &total_functional, 1, MPI_DOUBLE,
+    // Normalize protein output
+    output *= (1 - exp(t_cell * (1 - pnat) / degradation_param)) / t_cell;
+
+    MPI_Allreduce(&output, &total_output, 1, MPI_DOUBLE,
 		  MPI_SUM, g_subcomm);
-    double survival_average = total_functional / (double)g_subcomm_size;
+    double output_average = total_output / (double)g_subcomm_size;
 
     // Also determine native energy
     MPI_Allreduce(&conf_energy, native_energy, 1, MPI_DOUBLE, MPI_MIN,
 		  g_subcomm);
     
-    return survival_average;
+    return output_average;
 }
 
 

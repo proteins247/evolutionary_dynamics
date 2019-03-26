@@ -1,6 +1,11 @@
 
 [comment]: # -*- mode: markdown -*-
 # Changelog for folding_evolution
+## [0.0.11] - 2019-03-26
+### Changed
+- Fitness function based on protein output extrapolation.
+- Requires latPack/1.9.1-15 or greater (but not enforced)
+
 ## [0.0.10] - 2019-03-17
 ### Added
 - `folding_evolution` will check during checkpoint resume that the same
