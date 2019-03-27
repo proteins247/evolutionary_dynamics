@@ -121,7 +121,7 @@ static const int DEFAULT_POPULATION_SIZE = 500;
 static const int DEFAULT_MUTATION_MODE = 2;    // MutateAll default value
 static const double DEFAULT_TEMPERATURE = 0.3;
 static const double DEFAULT_REEVALUATION_RATIO = 0.5; // Not commandline option.
-static const double DEFAULT_FITNESS_CONSTANT = 0.75;
+static const double DEFAULT_FITNESS_CONSTANT = 0.25;
 static const double DEFAULT_DEGRADATION_PARAM = 1000000;
 static const double DEFAULT_POSTTRANSLATION_TIME = 500000;
 static const double DEFAULT_CELL_TIME = DEFAULT_POSTTRANSLATION_TIME * 100;
@@ -1643,7 +1643,7 @@ double get_protein_output_avg(
     H5Fclose(file_id);
 
     // Normalize protein output
-    output *= (1 - exp(t_cell * (1 - pnat) / degradation_param)) / t_cell;
+    output *= (1 - exp(-t_cell * (1 - pnat) / degradation_param)) / t_cell;
 
     MPI_Allreduce(&output, &total_output, 1, MPI_DOUBLE,
 		  MPI_SUM, g_subcomm);
@@ -1663,7 +1663,8 @@ double calculate_fitness(
     double f_0)
 {
     // 0.0001 to avoid divide by zero error
-    return 0.0001 + protein_output / (protein_output + f_0);    
+    // return 0.0001 + protein_output / (protein_output + f_0);
+    return 0.0001 + protein_output;
 }
 
 
