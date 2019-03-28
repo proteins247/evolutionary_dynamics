@@ -245,6 +245,7 @@ double get_protein_output_avg(
     const std::string& filename,
     double* native_energy,
     double degradation_param,
+    double protein_length,
     double t_cell=DEFAULT_CELL_TIME);
 
 
@@ -923,7 +924,7 @@ int main(int argc, char** argv)
     int last_accepted_gen = 0;
     int n_gens_without_accept = 0;
     int mutation_type = -1;
-    double old_fitness = 0.001;
+    double old_fitness = 0.0001;
     double fitness;
     double old_protein_output = 0;
     double protein_output;
@@ -986,7 +987,8 @@ int main(int argc, char** argv)
 
 	    run_latfoldvec(prev_latfoldvec_command, hdf5_output_file.str());
 	    protein_output = get_protein_output_avg(
-		hdf5_output_file.str(), &native_energy, degradation_param);
+		hdf5_output_file.str(), &native_energy,
+		protein_length, degradation_param);
 
 	    // Now update old fitness
 	    old_protein_output = reaverage_protein_output(
@@ -1024,7 +1026,8 @@ int main(int argc, char** argv)
 
 	    run_latfoldvec(latfoldvec_command, hdf5_output_file.str());
 	    protein_output = get_protein_output_avg(
-		hdf5_output_file.str(), &native_energy, degradation_param);
+		hdf5_output_file.str(), &native_energy,
+		protein_length, degradation_param);
 	    fitness = calculate_fitness(protein_output);
 	}
 	MPI_Bcast(&native_energy, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
@@ -1606,6 +1609,7 @@ double get_protein_output_avg(
     const std::string& filename,
     double* native_energy,
     double degradation_param,
+    double protein_length,
     double t_cell)
 {
     double output = 0;
@@ -1643,6 +1647,7 @@ double get_protein_output_avg(
     H5Fclose(file_id);
 
     // Normalize protein output
+    output /= protein_length;
     output *= (1 - exp(-t_cell * (1 - pnat) / degradation_param)) / t_cell;
 
     MPI_Allreduce(&output, &total_output, 1, MPI_DOUBLE,
