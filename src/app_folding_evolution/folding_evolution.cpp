@@ -1,5 +1,5 @@
 /* 
- * folding_evolution v0.0.11
+ * folding_evolution v0.0.11 (drafting)
  *
  * v0.0.11
  *
@@ -120,11 +120,11 @@ static const int DEFAULT_JSON_OUTFREQ = 5;
 static const int DEFAULT_POPULATION_SIZE = 500;
 static const int DEFAULT_MUTATION_MODE = 2;    // MutateAll default value
 static const double DEFAULT_TEMPERATURE = 0.3;
-static const double DEFAULT_REEVALUATION_RATIO = 0.5; // Not commandline option.
+static const double DEFAULT_REEVALUATION_RATIO = 0.25; // Not commandline option.
 static const double DEFAULT_FITNESS_CONSTANT = 0.25;
 static const double DEFAULT_DEGRADATION_PARAM = 1000000;
-static const double DEFAULT_POSTTRANSLATION_TIME = 500000;
-static const double DEFAULT_CELL_TIME = DEFAULT_POSTTRANSLATION_TIME * 100;
+static const double DEFAULT_POSTTRANSLATION_TIME = 0.75e6;
+static const double DEFAULT_CELL_TIME = 5e7;
 
 static const std::vector<Codon> STOP_CODONS = {N_UAA, N_UAG, N_UGA};
 
@@ -924,7 +924,7 @@ int main(int argc, char** argv)
     int last_accepted_gen = 0;
     int n_gens_without_accept = 0;
     int mutation_type = -1;
-    double old_fitness = 0.0001;
+    double old_fitness = 0.0000001;
     double fitness;
     double old_protein_output = 0;
     double protein_output;
@@ -988,7 +988,7 @@ int main(int argc, char** argv)
 	    run_latfoldvec(prev_latfoldvec_command, hdf5_output_file.str());
 	    protein_output = get_protein_output_avg(
 		hdf5_output_file.str(), &native_energy,
-		protein_length, degradation_param);
+		degradation_param, protein_length);
 
 	    // Now update old fitness
 	    old_protein_output = reaverage_protein_output(
@@ -1027,7 +1027,7 @@ int main(int argc, char** argv)
 	    run_latfoldvec(latfoldvec_command, hdf5_output_file.str());
 	    protein_output = get_protein_output_avg(
 		hdf5_output_file.str(), &native_energy,
-		protein_length, degradation_param);
+		degradation_param, protein_length);
 	    fitness = calculate_fitness(protein_output);
 	}
 	MPI_Bcast(&native_energy, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
@@ -1619,14 +1619,6 @@ double get_protein_output_avg(
     hid_t file_id = H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
     hid_t group_id = H5Gopen2(file_id, "traj1", H5P_DEFAULT);
 
-    // // Get protein length
-    // hid_t sequence_attr = H5Aopen(file_id, "Sequence", H5P_DEFAULT);
-    // hid_t sequence_attr_t = H5Aget_type(sequence_attr);
-    // size_t sequence_attr_size = H5Tget_size(sequence_attr_t);
-    // size_t protein_length = sequence_attr_size - 1;
-    // H5Tclose(sequence_attr_t);
-    // H5Aclose(sequence_attr);
-
     // Read two relevant attributes from 'traj1'
     hid_t output_attr = H5Aopen(group_id, "Protein output",
 				H5P_DEFAULT);
@@ -1667,9 +1659,9 @@ double calculate_fitness(
     double protein_output,
     double f_0)
 {
-    // 0.0001 to avoid divide by zero error
-    // return 0.0001 + protein_output / (protein_output + f_0);
-    return 0.0001 + protein_output;
+    // 0.0000001 (1e-7) to avoid divide by zero error
+    // return 0.0000001 + protein_output / (protein_output + f_0);
+    return 0.0000001 + protein_output;
 }
 
 
@@ -1707,8 +1699,8 @@ void print_header(
     *outstream << shorten("AA sequence", aa_sequence.size()) << "|";
     *outstream << shorten("Nuc sequence", nuc_sequence.size()) << "|";
     *outstream << 
-	std::setw(7) << "Old fit" << "|" <<
-	std::setw(7) << "New fit" << "|" <<
+	std::setw(8) << "Old fit." << "|" <<
+	std::setw(8) << "New fit." << "|" <<
 	std::setw(7) << "Nat. E." << "|" <<
 	std::setw(6) << "Accept"
 	       << std::endl;
@@ -1716,12 +1708,12 @@ void print_header(
     int line_length = 4;
     line_length += aa_sequence.size() + 1;
     line_length += nuc_sequence.size() + 1;
-    line_length += 21 + 3;
+    line_length += 23 + 3;
     line_length += 6;
 
     *outstream << "# " << std::string(line_length, '-')<< std::endl;
 
-    *outstream << std::fixed << std::setprecision(2);
+    *outstream << std::fixed << std::setprecision(3);
     
     return;
 }
@@ -1749,8 +1741,10 @@ void print_state(
 	       << std::setw(5) << generation << " "
 	       << std::setw(aa_seq_len) << aa_seq_str.get() << " "
 	       << std::setw(nuc_seq_len) << nuc_seq_str.get() << " "
-	       << std::setw(7) << old_fitness << " "
-	       << std::setw(7) << new_fitness << " "
+	       << std::setprecision(5)
+	       << std::setw(8) << old_fitness << " "
+	       << std::setw(8) << new_fitness << " "
+	       << std::setprecision(2)
 	       << std::setw(7) << native_energy << " "	
 	       << std::setw(6) << ((accept) ? "yes" : "no")
 	       << std::endl;
