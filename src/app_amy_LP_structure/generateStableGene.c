@@ -70,7 +70,7 @@ int main(int argc, char *argv[])
     if (optind + 2 == argc)
     {
 	confC = atoi(argv[optind++]);
-	seed = atol(argv[optind]);
+	seed = strtoul(argv[optind], NULL, 10);
     }
     else
     {
