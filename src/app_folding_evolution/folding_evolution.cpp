@@ -1,7 +1,7 @@
 /* 
- * folding_evolution v0.0.11 (drafting)
+ * folding_evolution v0.0.12 (drafting)
  *
- * v0.0.11
+ * v0.0.12
  *
  */
 
@@ -1616,7 +1616,24 @@ double get_protein_output_avg(
     double total_output = 0;
 
     // We need to read data from HDF5 file
-    hid_t file_id = H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    int error_count = 0;
+    hid_t file_id;
+    while (error_count < 5)
+    {
+	file_id = H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+	if (file_id >= 0)
+	    break;
+	sleep(5);
+	++error_count;
+    }
+    if (error_count > 5)
+    {
+	std::cerr << "Could not open file \"" << filename
+		  << "\" after 5 attempts.\n";
+	std::cerr << "Ending program.\n";
+	MPI_Abort(MPI_COMM_WORLD, IO_ERROR);	
+    }
+
     hid_t group_id = H5Gopen2(file_id, "traj1", H5P_DEFAULT);
 
     // Read two relevant attributes from 'traj1'

@@ -1,13 +1,17 @@
 
 [comment]: # -*- mode: markdown -*-
 # Changelog for folding_evolution
+## [0.0.12] - 2019-04
+### Changed
+- Check for failure when opening hdf5 files.
+
 ## [0.0.11] - 2019-03-26
 ### Changed
 - Fitness function based on protein output extrapolation.
 - Requires latPack/1.9.1-15 or greater (but not enforced)
 - Fitness function is purely linear (no x / x0 + x transformation)
 - Minimum fitness value is 1e-7
-- Posttranslation simulation time is 1e6
+- Posttranslation simulation time is 0.75e6
 - `DEFAULT_REEVALUATION_RATIO` changed to 0.25
 
 ## [0.0.10] - 2019-03-17

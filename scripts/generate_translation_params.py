@@ -2,9 +2,10 @@
 """
 generate_translation_params.py
 
-Takes translation time data from Ciryam et al. (2013) PNAS, multiplies
-the times by a scaling factor, and outputs it as (codon, time) pairs
-for use as a parameter file for folding_evolution.
+Takes translation time data from Ciryam et al. (2013) PNAS (Table S1,
+24 min doubling time), multiplies the times by a scaling factor, and
+outputs it as (codon, time) pairs for use as a parameter file for
+folding_evolution.
 
 The codons are represented as hexadecimal numbers.
 
