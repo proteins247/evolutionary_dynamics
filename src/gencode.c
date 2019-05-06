@@ -143,8 +143,8 @@ static Codon AAtoCodon(AminoAcid aa, int random)
     switch (aa)
     {
     case A_Cys: {
-        codons[1] = N_UGU;
-        codons[0] = N_UGC;
+        codons[0] = N_UGU;
+        codons[1] = N_UGC;
         break; }
     case A_Met: {
         codons[0] = N_AUG;
@@ -167,10 +167,10 @@ static Codon AAtoCodon(AminoAcid aa, int random)
         codons[0] = N_CUG;
         break; }
     case A_Val: {
-        codons[1] = N_GUU;
-        codons[2] = N_GUC;
-        codons[3] = N_GUA;
-        codons[0] = N_GUG;
+        codons[0] = N_GUU;
+        codons[1] = N_GUC;
+        codons[2] = N_GUA;
+        codons[3] = N_GUG;
         break; }
     case A_Trp: {
         codons[0] = N_UGG;
@@ -218,12 +218,12 @@ static Codon AAtoCodon(AminoAcid aa, int random)
         codons[1] = N_GAC;
         break; }
     case A_Glu: {
-        codons[0] = N_GAA;
-        codons[1] = N_GAG;
+        codons[1] = N_GAA;
+        codons[0] = N_GAG;
         break; }
     case A_His: {
-        codons[0] = N_CAU;
-        codons[1] = N_CAC;
+        codons[1] = N_CAU;
+        codons[0] = N_CAC;
         break; }
     case A_Arg: {
         codons[0] = N_CGU;
@@ -238,8 +238,8 @@ static Codon AAtoCodon(AminoAcid aa, int random)
         codons[1] = N_AAG;
         break; }
     case A_Pro: {
-        codons[0] = N_CCU;
-        codons[1] = N_CCC;
+        codons[1] = N_CCU;
+        codons[0] = N_CCC;
         codons[2] = N_CCA;
         codons[3] = N_CCG;
         break; }
