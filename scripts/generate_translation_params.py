@@ -22,7 +22,7 @@ import numpy as np
 from Bio.Seq import Seq
 from Bio.Alphabet import IUPAC
 
-translation_times = {           # in ms
+TRANSLATION_TIMES = {           # in ms
     "UUU": 99.0  ,
     "UUC": 156.4 ,
     "UUG": 42.1  ,
@@ -111,7 +111,7 @@ def codon_to_aa(codon):
 def gather_codons():
     """Collect codons by amino acid they encode."""
     aa_to_codon = collections.defaultdict(list)
-    for codon in translation_times.keys():
+    for codon in TRANSLATION_TIMES.keys():
         aa_to_codon[codon_to_aa(codon)].append(codon)
     return aa_to_codon
 
@@ -122,22 +122,22 @@ def make_simplified_table():
     """
     aa_to_codon = gather_codons()
     # Sort codons for each AA by translation time
-    by_fastest = {aa: sorted([(c, translation_times[c]) for c in codons],
+    by_fastest = {aa: sorted([(c, TRANSLATION_TIMES[c]) for c in codons],
                              key=lambda x: x[-1])
                   for aa, codons in aa_to_codon.items()}
     simplified = {}
 
     for aa, codons in by_fastest.items():
         codons = [c[0] for c in codons]
-        num = len(codons)
-        # The number of fast codons:
+        # The number of fast codons, floor of half the total number of
+        # codons for the amino acid
         num_fast = int(len(codons) / 2)
         for c in codons[:num_fast]:
             simplified[c] = FAST
         for c in codons[num_fast:]:
             simplified[c] = SLOW
     return simplified
-            
+
 
 def codon_triplet_to_int(triplet):
     n1 = letter_to_num[triplet[0]]
@@ -165,6 +165,8 @@ def main(args):
     if args.simplified:
         # Replace real data with simplified values
         translation_times = make_simplified_table()
+    else:
+        translation_times = TRANSLATION_TIMES
     for i, (codon, time) in enumerate(sorted(
             translation_times.items(),
             key=lambda x: codon_triplet_to_int(x[0]))):

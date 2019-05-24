@@ -76,6 +76,7 @@ echo
 echo "Installing..."
 cd $FOLDEVODIR
 cp -f folding_evolution "${BINDIR}"
+cp -f design_sequence.py "${BINDIR}"
 cd $GENEDIR
 cp -f generateStableGene "${BINDIR}"
 /bin/cp -rf ../../share/* "${SHAREDIR}"

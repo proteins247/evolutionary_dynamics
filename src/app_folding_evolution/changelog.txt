@@ -1,9 +1,14 @@
 
 [comment]: # -*- mode: markdown -*-
 # Changelog for folding_evolution
-## [0.0.12] - 2019-04
+## [0.0.12] - 2019-05
+### Added
+- Simplified translation time parameters available: times_simple_scale100x.dat
+- design_sequence.py sequence ddesign script using z-score
 ### Changed
 - Check for failure when opening hdf5 files.
+### Fixed
+- The fastest codons were wrong for 5 amino acids in gencode.c.
 
 ## [0.0.11] - 2019-03-26
 ### Changed
