@@ -60,7 +60,12 @@ echo "Compiling folding_evolution..."
 mpic++ -Wall -O3 -std=c++11 folding_evolution.cpp -o folding_evolution -lhdf5 \
        ../rng.o ../gencode.o
 if [ $? -ne 0 ]; then
-    echo "Compile FoldEvo failed"
+    echo "Compile folding_evolution.cpp failed"
+    exit -1
+fi
+gcc -Wall -O3 translation_schedule.c ../gencode.o ../rng.o -o translation_schedule
+if [ $? -ne 0 ]; then
+    echo "Compile translation_schedule.c failed"
     exit -1
 fi
 echo "Compiling generateStableGene..."
@@ -76,6 +81,7 @@ echo
 echo "Installing..."
 cd $FOLDEVODIR
 cp -f folding_evolution "${BINDIR}"
+cp -f translation_schedule "${BINDIR}"
 cp -f design_sequence.py "${BINDIR}"
 cd $GENEDIR
 cp -f generateStableGene "${BINDIR}"

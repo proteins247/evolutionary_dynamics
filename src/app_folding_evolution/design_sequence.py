@@ -55,7 +55,7 @@ def design_sequence(input_sequence, points, potential, target=-45,
             energy = new_energy
         n_iterations += 1
     if n_iterations >= max_iterations:
-        print("Reached iteration limit", max_iterations)
+        print("--> Reached iteration limit", max_iterations)
     return sequence, energy, z_score
 
 
@@ -65,6 +65,7 @@ def parse_args():
     parser.add_argument("--temperature", type=float, default=0.1)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--target-score", type=float, default=-45)
+    parser.add_argument("--max-iterations", type=int, default=30000)
     return parser.parse_args()
 
 
@@ -90,33 +91,33 @@ def main(args):
     z_score = lp.z_score(points, sequence, potential, energy, contact_count)
 
     print("Starting sequence:", lp.number_sequence_to_letters(sequence))
-    print("Starting sequence:", sequence)
     print("Starting energy:", energy)
     print("Starting z-score:", z_score)
 
     sequence, energy, z_score = design_sequence(
         sequence, points, potential, temperature=args.temperature,
-        target=args.target_score)
+        target=args.target_score, max_iterations=args.max_iterations)
 
-    print()
     print("Ending sequence:", lp.number_sequence_to_letters(sequence))
-    print("Ending sequence:", sequence)
     print("Ending energy:", energy)
     print("Ending z-score:", z_score)
 
     outfile = "%d.sourceme" % (args.conformation)
     print("Writing to", outfile)
+    print()
     with open(outfile, 'w') as f:
         f.write("CONFORMATIONNO=%d\n" % args.conformation)
         f.write("CONTACTORDER=%f\n" % contact_order)
         f.write("DESIGNTEMP=%.2f\n" % args.temperature)
-        f.write("SEQUENCE=%s\n" % lp.number_sequence_to_letters(sequence))
+        f.write("AASEQ=%s\n" % lp.number_sequence_to_letters(sequence))
         f.write("NATIVEENERGY=%.2f\n" % energy)
         f.write("CONFORMATION=%s\n" % conformation)
         f.write("ZSCORE=%.2f\n" % z_score)
-
-    return
+    if z_score > args.target_score:
+        return 1
+    else:
+        return 0
 
 
 if __name__ == "__main__":
-    main(parse_args())
+    sys.exit(main(parse_args()))

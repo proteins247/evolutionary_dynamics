@@ -5,6 +5,7 @@
 ### Added
 - Simplified translation time parameters available: times_simple_scale100x.dat
 - design_sequence.py sequence ddesign script using z-score
+- translation_schedule utility program to print a translation schedule.
 ### Changed
 - Check for failure when opening hdf5 files.
 ### Fixed
