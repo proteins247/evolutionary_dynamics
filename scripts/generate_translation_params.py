@@ -139,6 +139,13 @@ def make_simplified_table():
     return simplified
 
 
+def make_flat_table():
+    table = {}
+    for codon in TRANSLATION_TIMES:
+        table[codon] = FAST
+    return table
+
+
 def codon_triplet_to_int(triplet):
     n1 = letter_to_num[triplet[0]]
     n2 = letter_to_num[triplet[1]]
@@ -149,7 +156,12 @@ def codon_triplet_to_int(triplet):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--scaling', type=float, default=1.)
-    parser.add_argument('--simplified', action='store_true')
+    parser.add_argument('--simplified', action='store_true',
+                        help="Generate simplified table with only two "
+                        "values for translation times.")
+    parser.add_argument('--flat', action='store_true',
+                        help="Generate table in which all codons use a single "
+                        "value for translation times.")
     return parser.parse_args()
 
 
@@ -165,8 +177,11 @@ def main(args):
     if args.simplified:
         # Replace real data with simplified values
         translation_times = make_simplified_table()
+    elif args.flat:
+        translation_times = make_flat_table()
     else:
         translation_times = TRANSLATION_TIMES
+
     for i, (codon, time) in enumerate(sorted(
             translation_times.items(),
             key=lambda x: codon_triplet_to_int(x[0]))):

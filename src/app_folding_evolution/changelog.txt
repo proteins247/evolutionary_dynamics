@@ -1,7 +1,15 @@
 
 [comment]: # -*- mode: markdown -*-
 # Changelog for folding_evolution
-## [0.0.12] - 2019-05
+## [0.0.13] - 2019-06
+### Added
+- Several flat translation time parameter files
+### Changed
+- Default temperature 0.2
+- generate_translation_params.py supports flat schedules (same param
+  for every codon)
+
+## [0.0.12] - 2019-05-30
 ### Added
 - Simplified translation time parameters available: times_simple_scale100x.dat
 - design_sequence.py sequence ddesign script using z-score

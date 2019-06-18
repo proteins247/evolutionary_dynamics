@@ -1,7 +1,7 @@
 /* 
- * folding_evolution v0.0.12 (drafting)
+ * folding_evolution v0.0.13 (drafting)
  *
- * v0.0.12
+ * v0.0.13
  *
  */
 
@@ -76,8 +76,9 @@ static const std::string helptext =
     "                            times of the codons.\n"
     "  -d, --debug               Allow error messages from all processors.\n"
     "  -f, --from-checkpoint     Resume simulation from checkpoint file.\n"
-    "  -k, --degradation-param=K Value setting timescale for protein degradation\n"
-    "                            (penalizes slow folding/low P_nat).\n"
+    "  -k, --degradation-param=K Value setting timescale for protein\n"
+    "                            degradation (penalizes slow folding and\n"
+    "                            low stability).\n"
     "  -m, --mutation-mode=M     One of 0, 1, or 2, indicating restriction to\n"
     "                            synonymous mutation, nonsynonymous mutation,\n"
     "                            or allow both kinds of mutations (default).\n"
@@ -92,7 +93,7 @@ static const std::string helptext =
     "                            (Default behavior is to use fastest codons.)\n"
     "  -r, --seed=N              RNG seed. Default=1\n"
     "  -t, --temperature=T       Temperature of latFoldVec simulations.\n"
-    "                            Default=0.3\n"
+    "                            Default=0.2\n"
     "  -z, --instant-release     Release from ribosome immediately after\n"
     "                            translation.\n"
     "      --help   Display this help and exit.\n"
@@ -114,17 +115,18 @@ static const int LATPACK_ERROR = 4;
 static const int GENS_MAX = 99999;
 static const std::string DEFAULT_OUTPATH = "./out";
 static const uint64_t DEFAULT_SEED = 1;
-static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
 static const int DEFAULT_CHECKPOINT_FREQ = 10;
 static const int DEFAULT_JSON_OUTFREQ = 5;
 static const int DEFAULT_POPULATION_SIZE = 500;
 static const int DEFAULT_MUTATION_MODE = 2;    // MutateAll default value
-static const double DEFAULT_TEMPERATURE = 0.3;
-static const double DEFAULT_REEVALUATION_RATIO = 0.25; // Not commandline option.
-static const double DEFAULT_FITNESS_CONSTANT = 0.25;
+static const double DEFAULT_TEMPERATURE = 0.2;
+// Not commandline options:
+static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
+static const double DEFAULT_REEVALUATION_RATIO = 0.25;
+// static const double DEFAULT_FITNESS_CONSTANT = 0.25;
 static const double DEFAULT_DEGRADATION_PARAM = 1000000;
 static const double DEFAULT_POSTTRANSLATION_TIME = 0.75e6;
-static const double DEFAULT_CELL_TIME = 5e7;
+static const double DEFAULT_CELL_TIME = 5e7;	   // Used to normalize fitness.
 
 static const std::vector<Codon> STOP_CODONS = {N_UAA, N_UAG, N_UGA};
 
@@ -223,7 +225,7 @@ void run_latfoldvec(
 //     const std::string& folded_conformation);
 
 
-// // FIXME (this function is not currently used)
+// // (this function is not currently used)
 // // Use fork and exec to run n_simulations of latMapTraj to analyze the
 // // latFoldVec simulations that were run.
 // void run_latmaptraj(
@@ -647,8 +649,9 @@ int main(int argc, char** argv)
 	    }
 	}
 
-	// Wait for slow network file system
+	// Wait for everyone
 	MPI_Barrier(MPI_COMM_WORLD);
+	// Wait in case network file system is slow
 	while (!is_dir_exist(lat_sim_out_path))
 	{
 	    sleep(1);
