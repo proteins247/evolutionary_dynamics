@@ -1654,6 +1654,7 @@ double get_protein_output_avg(
     H5Aread(conf_energy_attr, H5T_NATIVE_DOUBLE, &conf_energy);
 
     H5Aclose(output_attr);
+    H5Aclose(pnat_attr);
     H5Aclose(conf_energy_attr);    
     H5Gclose(group_id);
     H5Fclose(file_id);
