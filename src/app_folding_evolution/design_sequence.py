@@ -37,6 +37,7 @@ def design_sequence(input_sequence, points, potential, target=-45,
     energy, contact_count = lp.energy(points, sequence, potential)
     z_score = lp.z_score(points, sequence, potential, energy, contact_count)
     n_iterations = 0
+    min_result = (sequence, energy, z_score)
     while z_score > target and n_iterations < max_iterations:
         new_sequence = lp.mutate_number_sequence(
             sequence, length_range=mutation_range)
@@ -48,6 +49,7 @@ def design_sequence(input_sequence, points, potential, target=-45,
             sequence = new_sequence
             z_score = new_z_score
             energy = new_energy
+            min_result = (sequence, energy, z_score)
         elif np.random.rand() < np.exp(
                 -(new_z_score - z_score) / temperature):
             sequence = new_sequence
@@ -56,6 +58,7 @@ def design_sequence(input_sequence, points, potential, target=-45,
         n_iterations += 1
     if n_iterations >= max_iterations:
         print("--> Reached iteration limit", max_iterations)
+        return min_result
     return sequence, energy, z_score
 
 
@@ -65,7 +68,8 @@ def parse_args():
     parser.add_argument("--temperature", type=float, default=0.1)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--target-score", type=float, default=-45)
-    parser.add_argument("--max-iterations", type=int, default=30000)
+    parser.add_argument("--max-iterations", type=int, default=40000)
+    parser.add_argument("--max-outer-iterations", type=int, default=5)
     return parser.parse_args()
 
 
@@ -84,23 +88,31 @@ def main(args):
     if args.seed is not None:
         np.random.seed(args.seed)
 
-    # Random sequence
-    length = len(conformation) + 1
-    sequence = lp.random_sequence(length)
-    energy, contact_count = lp.energy(points, sequence, potential)
-    z_score = lp.z_score(points, sequence, potential, energy, contact_count)
+    results = []
 
-    print("Starting sequence:", lp.number_sequence_to_letters(sequence))
-    print("Starting energy:", energy)
-    print("Starting z-score:", z_score)
+    for i in range(args.max_outer_iterations):
+        # Random sequence
+        length = len(conformation) + 1
+        sequence = lp.random_sequence(length)
+        energy, contact_count = lp.energy(points, sequence, potential)
+        z_score = lp.z_score(points, sequence, potential, energy, contact_count)
 
-    sequence, energy, z_score = design_sequence(
-        sequence, points, potential, temperature=args.temperature,
-        target=args.target_score, max_iterations=args.max_iterations)
+        print("Iteration", i)
+        print("Starting sequence:", lp.number_sequence_to_letters(sequence))
+        print("Starting energy:", energy)
+        print("Starting z-score:", z_score)
 
-    print("Ending sequence:", lp.number_sequence_to_letters(sequence))
-    print("Ending energy:", energy)
-    print("Ending z-score:", z_score)
+        sequence, energy, z_score = design_sequence(
+            sequence, points, potential, temperature=args.temperature,
+            target=args.target_score, max_iterations=args.max_iterations)
+
+        print("Ending sequence:", lp.number_sequence_to_letters(sequence))
+        print("Ending energy:", energy)
+        print("Ending z-score:", z_score)
+        results.append((z_score, energy, sequence))
+
+    best_result = sorted(results, key=lambda x: x[0])[0]
+    z_score, energy, sequence = best_result
 
     outfile = "%d.sourceme" % (args.conformation)
     print("Writing to", outfile)
