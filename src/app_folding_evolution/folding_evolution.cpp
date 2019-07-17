@@ -1,7 +1,7 @@
 /* 
  * folding_evolution v0.0.13 (drafting)
  *
- * v0.0.13
+ * branch: stability_only
  *
  */
 
@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <numeric>
+#include <algorithm>
 #include <csignal> 		// eventually need to think about handling interrupts
 #include <cstring>
 #include <cstdio>
@@ -125,7 +127,7 @@ static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
 static const double DEFAULT_REEVALUATION_RATIO = 0.25;
 static const double DEFAULT_FITNESS_CONSTANT = 0.25;
 static const double DEFAULT_DEGRADATION_PARAM = 1000000;
-static const double DEFAULT_POSTTRANSLATION_TIME = 0.75e6;
+static const double DEFAULT_POSTTRANSLATION_TIME = 1.5e6;
 static const double DEFAULT_CELL_TIME = 5e7;	   // Used to normalize fitness.
 
 static const std::vector<Codon> STOP_CODONS = {N_UAA, N_UAG, N_UGA};
@@ -247,7 +249,6 @@ double get_protein_output_avg(
     const std::string& filename,
     double* native_energy,
     double degradation_param,
-    double protein_length,
     double t_cell=DEFAULT_CELL_TIME);
 
 
@@ -990,8 +991,7 @@ int main(int argc, char** argv)
 
 	    run_latfoldvec(prev_latfoldvec_command, hdf5_output_file.str());
 	    protein_output = get_protein_output_avg(
-		hdf5_output_file.str(), &native_energy,
-		degradation_param, protein_length);
+		hdf5_output_file.str(), &native_energy, degradation_param);
 
 	    // Now update old fitness
 	    old_protein_output = reaverage_protein_output(
@@ -1029,8 +1029,7 @@ int main(int argc, char** argv)
 
 	    run_latfoldvec(latfoldvec_command, hdf5_output_file.str());
 	    protein_output = get_protein_output_avg(
-		hdf5_output_file.str(), &native_energy,
-		degradation_param, protein_length);
+		hdf5_output_file.str(), &native_energy, degradation_param);
 	    fitness = calculate_fitness(protein_output);
 	}
 	MPI_Bcast(&native_energy, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
@@ -1608,15 +1607,14 @@ void run_latfoldvec(
 
 // Analyze latFoldVec simulations to average protein output.
 // This is a parallel function.
+// This version of code uses pnat only
 double get_protein_output_avg(
     const std::string& filename,
     double* native_energy,
     double degradation_param,
-    double protein_length,
     double t_cell)
 {
     double output = 0;
-    double total_output = 0;
 
     // We need to read data from HDF5 file
     int error_count = 0;
@@ -1639,38 +1637,75 @@ double get_protein_output_avg(
 
     hid_t group_id = H5Gopen2(file_id, "traj1", H5P_DEFAULT);
 
-    // Read two relevant attributes from 'traj1'
-    hid_t output_attr = H5Aopen(group_id, "Protein output",
-				H5P_DEFAULT);
+    // Read attributes from 'traj1'
     hid_t pnat_attr = H5Aopen(group_id, "Fraction target conf",
 			      H5P_DEFAULT);
+    hid_t last_step_attr = H5Aopen(group_id, "Last step",
+				   H5P_DEFAULT);
+    hid_t steps_to_target_attr = H5Aopen(group_id, "Steps to target",
+					 H5P_DEFAULT);
     hid_t conf_energy_attr = H5Aopen(group_id, "Target conf energy",
 				     H5P_DEFAULT);
-    double conf_energy = 0;
     double pnat = 0;
+    uint64_t last_step;
+    uint64_t steps_to_target;
+    double pnat_weight = 0;
+    double conf_energy = 0;
 
-    H5Aread(output_attr, H5T_NATIVE_DOUBLE, &output);
     H5Aread(pnat_attr, H5T_NATIVE_DOUBLE, &pnat);
+    H5Aread(last_step_attr, H5T_NATIVE_ULLONG, &last_step);
+    H5Aread(steps_to_target_attr, H5T_NATIVE_ULLONG, &steps_to_target);
     H5Aread(conf_energy_attr, H5T_NATIVE_DOUBLE, &conf_energy);
 
-    H5Aclose(output_attr);
+    H5Aclose(pnat_attr);
+    H5Aclose(last_step_attr);
+    H5Aclose(steps_to_target_attr);
     H5Aclose(conf_energy_attr);    
     H5Gclose(group_id);
     H5Fclose(file_id);
 
-    // Normalize protein output
-    output /= protein_length;
-    output *= (1 - exp(-t_cell * (1 - pnat) / degradation_param)) / t_cell;
+    if (steps_to_target == 0)
+    {
+	pnat_weight = 0;
+    }
+    else
+    {
+	pnat_weight = last_step - steps_to_target;
+    }
 
-    MPI_Allreduce(&output, &total_output, 1, MPI_DOUBLE,
-		  MPI_SUM, g_subcomm);
-    double output_average = total_output / (double)g_subcomm_size;
+    std::vector<double> pnats(g_subcomm_size);
+    std::vector<double> pnat_weights(g_subcomm_size);
+    uint64_t target_found;
+
+    // Do MPI
+    MPI_Allreduce(&steps_to_target, &target_found, 1, MPI_UNSIGNED_LONG,
+		  MPI_MAX, g_subcomm);
+    if (target_found != 0)
+    {
+	MPI_Allgather(&pnat, 1, MPI_DOUBLE, pnats.data(), 1,
+		      MPI_DOUBLE, g_subcomm);
+	MPI_Allgather(&pnat_weight, 1, MPI_DOUBLE, pnat_weights.data(), 1,
+		      MPI_DOUBLE, g_subcomm);
+
+	double pnat_weight_sum = std::accumulate(
+	    pnat_weights.begin(), pnat_weights.end(), 0.0);
+	std::for_each(pnat_weights.begin(), pnat_weights.end(),
+		      [pnat_weight_sum](double& w)
+			  { w /= pnat_weight_sum; });
+	pnat = std::inner_product(pnats.begin(), pnats.end(),
+				  pnat_weights.begin(), 0.0);
+	if (pnat == 1)
+	    pnat = 1 - 1e-10;
+	output = pnat * degradation_param / (1 - pnat);
+	output *= (1 - exp(-t_cell * (1 - pnat) / degradation_param)) / t_cell;
+    }
+    // (else, output = 0)
 
     // Also determine native energy
     MPI_Allreduce(&conf_energy, native_energy, 1, MPI_DOUBLE, MPI_MIN,
 		  g_subcomm);
     
-    return output_average;
+    return output;
 }
 
 
