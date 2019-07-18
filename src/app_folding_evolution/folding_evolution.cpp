@@ -123,7 +123,7 @@ static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
 static const double DEFAULT_REEVALUATION_RATIO = 0.25;
 static const double DEFAULT_FITNESS_CONSTANT = 0.25;
 static const double DEFAULT_DEGRADATION_PARAM = 1000000;
-static const double DEFAULT_SIM_TIME = 1.5e6;
+static const double DEFAULT_SIM_TIME = 1e6;
 static const double DEFAULT_CELL_TIME = 5e7;	   // Used to normalize fitness.
 
 static const std::vector<Codon> STOP_CODONS = {N_UAA, N_UAG, N_UGA};
