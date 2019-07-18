@@ -1533,7 +1533,7 @@ double get_protein_output_avg(
     output *= (1 - exp(-t_cell * (1 - pnat) / degradation_param)) / t_cell;
 
     double output_average = 0;
-    MPI_Allreduce(&output_average, &output, 1, MPI_DOUBLE, MPI_SUM, g_subcomm);
+    MPI_Allreduce(&output, &output_average, 1, MPI_DOUBLE, MPI_SUM, g_subcomm);
     output_average /= (double)g_subcomm_size;
 
     // Also determine native energy
