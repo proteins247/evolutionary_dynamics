@@ -1490,8 +1490,6 @@ double get_protein_output_avg(
     double degradation_param,
     double t_cell)
 {
-    double output = 0;
-
     // We need to read data from HDF5 file
     int error_count = 0;
     hid_t file_id;
@@ -1529,20 +1527,20 @@ double get_protein_output_avg(
     H5Gclose(group_id);
     H5Fclose(file_id);
 
-    double average_pnat;
-    MPI_Allreduce(&average_pnat, &pnat, 1, MPI_DOUBLE, MPI_SUM, g_subcomm);
-    average_pnat /= (double)g_subcomm_size;
-
-    if (average_pnat == 1)
-	pnat = 1 - 1e-10;
-    output = pnat * degradation_param / (1 - pnat);
+    if (pnat == 1)
+	pnat -= 1e-10;
+    double output = pnat * degradation_param / (1 - pnat);
     output *= (1 - exp(-t_cell * (1 - pnat) / degradation_param)) / t_cell;
+
+    double output_average = 0;
+    MPI_Allreduce(&output_average, &output, 1, MPI_DOUBLE, MPI_SUM, g_subcomm);
+    output_average /= (double)g_subcomm_size;
 
     // Also determine native energy
     MPI_Allreduce(&conf_energy, native_energy, 1, MPI_DOUBLE, MPI_MIN,
 		  g_subcomm);
     
-    return output;
+    return output_average;
 }
 
 
