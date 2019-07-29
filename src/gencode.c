@@ -502,6 +502,51 @@ int PointMutateCharNucSequence(char *NucSeq, int Len)
 }
 
 
+int AAMutateNucSequence(int *NucSeq, int Len)
+{
+    assert((Len % 3) == 0);
+    int aaLen = Len / 3;
+
+    AminoAcid AAS1[10000], AAS2[10000];
+    NucSeqToAASeq(NucSeq, Len, AAS1);
+
+    int aaToMutate = (int)(threefryrand() * aaLen);
+    AminoAcid currentAA = AAS1[aaToMutate];
+    AminoAcid newAA = currentAA;
+
+    do
+    {
+	newAA = (int)(threefryrand() * 20);
+    } while (newAA == currentAA);
+
+    /* Get new codon for new aa */
+    Codon newCodon = AAtoCodon(newAA, 0);
+
+    int n1, n2, n3;
+    /* Mask and bitshift to separate the three values */
+    n1 = (newCodon & 0x0f00) >> 8;
+    n2 = (newCodon & 0x00f0) >> 4;
+    n3 = (newCodon & 0x000f);
+
+    int codonStart = aaToMutate * 3;
+    NucSeq[codonStart] = n1;
+    NucSeq[codonStart + 1] = n2;
+    NucSeq[codonStart + 2] = n3;
+
+    NucSeqToAASeq(NucSeq, Len, AAS2);
+
+    int i, j = 0;
+    for (i = 0; i < Len / 3; i++)
+        if (AAS1[i] != AAS2[i])
+        {
+            j = 1;
+            break;
+        }
+
+    return j;
+}
+
+
 void PrintAASequence(char *buf, AminoAcid *Seq, int Len)
 {
     int i;

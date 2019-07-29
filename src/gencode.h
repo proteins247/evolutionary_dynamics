@@ -173,6 +173,13 @@ void AASeqToNucSeq(AminoAcid * AASeq, int * NucSeq, int AALen, int random);
 int PointMutateNucSequence(int *NucSeq, int Len);
 int PointMutateCharNucSequence(char *NucSeq, int Len);
 
+/* 
+ * AAMutateNucSequence
+ * Still working with nucleotide sequence, but make a nonsynonymous change
+ * with equal probabilities of getting another amino acid.
+ */
+int AAMutateNucSequence(int *NucSeq, int Len);
+
 /* Printing and data conversion routines: */
 /* input: int* or char* Seq {0,1,2,3}, output char *buf UCAG */
 /* returns 0 if successful, -1 upon encountering invalid letter */
