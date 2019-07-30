@@ -1100,21 +1100,25 @@ int main(int argc, char** argv)
 	    {
 		temp_sequence = nuc_sequence;
 		AAMutateNucSequence(temp_sequence.data(), nuc_length);
+		// This function should always work.
 	    }
 	    else		// synonymousonly == 0, mutateall == 2
 	    {
-		temp_sequence = nuc_sequence;
-		mutation_type = PointMutateNucSequence(
-		    nuc_sequence.data(), nuc_length);
-		if (mutation_type == mutation_mode)
-		    // mutation_type == mutation_mode == 0
-		    break;
-		if (mutation_mode == MutateAll && mutation_type >= 0)
-		    // either
-		    // mutation_type == 0
-		    // mutation_type == 1
-		    break;
-	    } while (true);
+		while (true)
+		{
+		    temp_sequence = nuc_sequence;
+		    mutation_type = PointMutateNucSequence(
+			nuc_sequence.data(), nuc_length);
+		    if (mutation_type == mutation_mode)
+			// mutation_type == mutation_mode == 0
+			break;
+		    if (mutation_mode == MutateAll && mutation_type >= 0)
+			// either
+			// mutation_type == 0
+			// mutation_type == 1
+			break;
+		}
+	    }
 	    nuc_sequence = temp_sequence;
 	}
 

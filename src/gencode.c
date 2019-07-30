@@ -533,6 +533,7 @@ int AAMutateNucSequence(int *NucSeq, int Len)
     NucSeq[codonStart + 1] = n2;
     NucSeq[codonStart + 2] = n3;
 
+    /* Stuff that follows is unnecessary */
     NucSeqToAASeq(NucSeq, Len, AAS2);
 
     int i, j = 0;
