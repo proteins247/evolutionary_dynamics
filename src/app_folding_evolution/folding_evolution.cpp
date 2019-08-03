@@ -1017,7 +1017,7 @@ int main(int argc, char** argv)
 		{
 		    temp_sequence = nuc_sequence;
 		    mutation_type = PointMutateNucSequence(
-			nuc_sequence.data(), nuc_length);
+			temp_sequence.data(), nuc_length);
 		    if (mutation_type == mutation_mode)
 			// mutation_type == mutation_mode == 0
 			break;
