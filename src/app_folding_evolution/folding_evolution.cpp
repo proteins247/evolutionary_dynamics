@@ -248,6 +248,7 @@ double get_protein_output_avg(
     double* native_energy,
     double degradation_param,
     double protein_length,
+    double total_translation_steps,
     double t_cell=DEFAULT_CELL_TIME);
 
 
@@ -991,7 +992,7 @@ int main(int argc, char** argv)
 	    run_latfoldvec(prev_latfoldvec_command, hdf5_output_file.str());
 	    protein_output = get_protein_output_avg(
 		hdf5_output_file.str(), &native_energy,
-		degradation_param, protein_length);
+		degradation_param, protein_length, old_total_translation_steps);
 
 	    // Now update old fitness
 	    old_protein_output = reaverage_protein_output(
@@ -1030,7 +1031,7 @@ int main(int argc, char** argv)
 	    run_latfoldvec(latfoldvec_command, hdf5_output_file.str());
 	    protein_output = get_protein_output_avg(
 		hdf5_output_file.str(), &native_energy,
-		degradation_param, protein_length);
+		degradation_param, protein_length, total_translation_steps);
 	    fitness = calculate_fitness(protein_output);
 	}
 	MPI_Bcast(&native_energy, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
@@ -1627,6 +1628,7 @@ double get_protein_output_avg(
     double* native_energy,
     double degradation_param,
     double protein_length,
+    double total_translation_steps,
     double t_cell)
 {
     double output = 0;
@@ -1653,18 +1655,22 @@ double get_protein_output_avg(
 
     hid_t group_id = H5Gopen2(file_id, "traj1", H5P_DEFAULT);
 
-    // Read two relevant attributes from 'traj1'
+    // Read relevant attributes from 'traj1'
     hid_t output_attr = H5Aopen(group_id, "Protein output",
 				H5P_DEFAULT);
     hid_t pnat_attr = H5Aopen(group_id, "Fraction target conf",
 			      H5P_DEFAULT);
+    hid_t steps_attr = H5Aopen(group_id, "Steps to target",
+			       H5P_DEFAULT);
     hid_t conf_energy_attr = H5Aopen(group_id, "Target conf energy",
 				     H5P_DEFAULT);
     double conf_energy = 0;
     double pnat = 0;
+    double steps_to_target = 0;
 
     H5Aread(output_attr, H5T_NATIVE_DOUBLE, &output);
     H5Aread(pnat_attr, H5T_NATIVE_DOUBLE, &pnat);
+    H5Aread(steps_attr, H5T_NATIVE_DOUBLE, &steps_to_target);
     H5Aread(conf_energy_attr, H5T_NATIVE_DOUBLE, &conf_energy);
 
     H5Aclose(output_attr);
@@ -1674,8 +1680,11 @@ double get_protein_output_avg(
     H5Fclose(file_id);
 
     // Normalize protein output
+    double folding_time = (steps_to_target - total_translation_steps) / protein_length;
     output /= protein_length;
-    output *= (1 - exp(-t_cell * (1 - pnat) / degradation_param)) / t_cell;
+    output *= (1 - exp(
+		   -(t_cell - folding_time)
+		   * (1 - pnat) / degradation_param)) / t_cell;
 
     MPI_Allreduce(&output, &total_output, 1, MPI_DOUBLE,
 		  MPI_SUM, g_subcomm);
