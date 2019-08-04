@@ -57,15 +57,17 @@ def design_sequence(input_sequence, points, potential, target=-45,
             energy = new_energy
         n_iterations += 1
     if n_iterations >= max_iterations:
-        print("--> Reached iteration limit", max_iterations)
+        print("Reached iteration limit:", max_iterations)
         return min_result
-    return sequence, energy, z_score
+    else:
+        print("Done. Iterations:", n_iterations)
+        return sequence, energy, z_score
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("conformation", type=int)
-    parser.add_argument("--temperature", type=float, default=0.1)
+    parser.add_argument("--temperature", type=float, default=0.15)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--target-score", type=float, default=-45)
     parser.add_argument("--max-iterations", type=int, default=40000)
@@ -110,6 +112,8 @@ def main(args):
         print("Ending energy:", energy)
         print("Ending z-score:", z_score)
         results.append((z_score, energy, sequence))
+        if z_score < args.target_score:
+            break
 
     best_result = sorted(results, key=lambda x: x[0])[0]
     z_score, energy, sequence = best_result
