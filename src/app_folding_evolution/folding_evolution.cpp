@@ -1,5 +1,5 @@
 /* 
- * folding_evolution v0.0.13 (drafting)
+ * folding_evolution v0.0.13
  *
  * v0.0.13
  *
