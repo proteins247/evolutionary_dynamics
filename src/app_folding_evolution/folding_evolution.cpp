@@ -1,7 +1,7 @@
 /* 
- * folding_evolution v0.0.13
+ * folding_evolution v0.0.14 draft
  *
- * v0.0.13
+ * v0.0.14 draft
  *
  */
 
@@ -123,7 +123,7 @@ static const double DEFAULT_TEMPERATURE = 0.2;
 // Not commandline options:
 static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
 static const double DEFAULT_REEVALUATION_RATIO = 0.25;
-static const double DEFAULT_FITNESS_CONSTANT = 0.25;
+static const double DEFAULT_FITNESS_CONSTANT = 0.01;
 static const double DEFAULT_DEGRADATION_PARAM = 1000000;
 static const double DEFAULT_POSTTRANSLATION_TIME = 0.75e6;
 static const double DEFAULT_CELL_TIME = 5e7;	   // Used to normalize fitness.
@@ -917,10 +917,10 @@ int main(int argc, char** argv)
     // The probability of posttranslation degradation is 1 - exp(-t/tau)
     // where tau = degradation_param and t = time since translation
     // (ribosome release).
-    // Set it to be log(8) * tau. (87.5% probability of degradation).
-    int posttranslational_folding_time = log(8) * degradation_param;
-    // no, instead we set it to be a fixed value
-    posttranslational_folding_time = DEFAULT_POSTTRANSLATION_TIME;
+    // Set it to be log(16) * tau. (93.75% probability of degradation).
+    int posttranslational_folding_time = log(16) * degradation_param;
+    // // no, instead we set it to be a fixed value
+    // posttranslational_folding_time = DEFAULT_POSTTRANSLATION_TIME;
     double degradation_scale_steps = degradation_param * protein_length;
     int gen = 0;
     int old_total_translation_steps;
@@ -1704,8 +1704,8 @@ double calculate_fitness(
     double f_0)
 {
     // 0.0000001 (1e-7) to avoid divide by zero error
-    // return 0.0000001 + protein_output / (protein_output + f_0);
-    return 0.0000001 + protein_output;
+    return 0.0000001 + protein_output / (protein_output + f_0);
+    // return 0.0000001 + protein_output;
 }
 
 
