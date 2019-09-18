@@ -1,5 +1,5 @@
 /* 
- * folding_evolution version b0.0.13
+ * folding_evolution version b0.0.14-draft1 (drafting)
  *
  * branch: stability_only
  *
@@ -12,8 +12,6 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <numeric>
-#include <algorithm>
 #include <csignal> 		// eventually need to think about handling interrupts
 #include <cstring>
 #include <cstdio>
@@ -124,7 +122,7 @@ static const double DEFAULT_REEVALUATION_RATIO = 0.25;
 static const double DEFAULT_FITNESS_CONSTANT = 0.25;
 static const double DEFAULT_DEGRADATION_PARAM = 1000000;
 static const double DEFAULT_SIM_TIME = 1e6;
-static const double DEFAULT_CELL_TIME = 5e7;	   // Used to normalize fitness.
+static const double DEFAULT_CELL_TIME = 100e6;	   // Used to normalize fitness.
 
 static const std::vector<Codon> STOP_CODONS = {N_UAA, N_UAG, N_UGA};
 
@@ -1564,8 +1562,8 @@ double calculate_fitness(
     double f_0)
 {
     // 0.0000001 (1e-7) to avoid divide by zero error
-    // return 0.0000001 + protein_output / (protein_output + f_0);
-    return 0.0000001 + protein_output;
+    return 0.0000001 + protein_output / (protein_output + f_0);
+    // return 0.0000001 + protein_output;
 }
 
 
