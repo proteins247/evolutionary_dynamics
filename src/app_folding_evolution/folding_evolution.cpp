@@ -1,5 +1,5 @@
 /* 
- * folding_evolution v0.0.13 (drafting)
+ * folding_evolution version b0.0.13
  *
  * branch: stability_only
  *
