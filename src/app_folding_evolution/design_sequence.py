@@ -69,8 +69,8 @@ def parse_args():
     parser.add_argument("conformation", type=int)
     parser.add_argument("--temperature", type=float, default=0.15)
     parser.add_argument("--seed", type=int)
-    parser.add_argument("--target-score", type=float, default=-45)
-    parser.add_argument("--max-iterations", type=int, default=40000)
+    parser.add_argument("--target-score", type=float, default=-50)
+    parser.add_argument("--max-iterations", type=int, default=15000)
     parser.add_argument("--max-outer-iterations", type=int, default=5)
     return parser.parse_args()
 

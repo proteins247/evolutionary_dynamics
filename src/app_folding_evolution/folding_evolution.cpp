@@ -1680,6 +1680,10 @@ double get_protein_output_avg(
     H5Fclose(file_id);
 
     // Normalize protein output
+    if (pnat == 1)
+    {
+	pnat = 1 - 1e-10;
+    }
     double folding_time = (steps_to_target - total_translation_steps) / protein_length;
     output /= protein_length;
     output *= (1 - exp(
