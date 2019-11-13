@@ -917,8 +917,8 @@ int main(int argc, char** argv)
     // The probability of posttranslation degradation is 1 - exp(-t/tau)
     // where tau = degradation_param and t = time since translation
     // (ribosome release).
-    // Set it to be log(16) * tau. (93.75% probability of degradation).
-    int posttranslational_folding_time = log(16) * degradation_param;
+    // Set it to be log(32) * tau. (96.875% probability of degradation).
+    int posttranslational_folding_time = log(32) * degradation_param;
     // // no, instead we set it to be a fixed value
     // posttranslational_folding_time = DEFAULT_POSTTRANSLATION_TIME;
     double degradation_scale_steps = degradation_param * protein_length;
