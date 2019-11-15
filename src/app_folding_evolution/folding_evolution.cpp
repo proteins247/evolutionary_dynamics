@@ -74,6 +74,8 @@ static const std::string helptext =
     "                            as a latPack-style move sequence.\n"
     "  -s, --speed-params=FILE   REQUIRED. Path to file with translation\n"
     "                            times of the codons.\n"
+    "  -a, --activity-constant   Set constant in fitness function.\n"
+    "                            Default=0.25\n"
     "  -d, --debug               Allow error messages from all processors.\n"
     "  -f, --from-checkpoint     Resume simulation from checkpoint file.\n"
     "  -k, --degradation-param=K Value setting timescale for protein\n"
@@ -125,7 +127,7 @@ static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
 static const double DEFAULT_REEVALUATION_RATIO = 0.25;
 static const double DEFAULT_FITNESS_CONSTANT = 0.25;
 static const double DEFAULT_DEGRADATION_PARAM = 1000000;
-static const double DEFAULT_POSTTRANSLATION_TIME = 0.75e6;
+static const double DEFAULT_POSTTRANSLATION_TIME = 0.75e6; // This is no longer used
 static const double DEFAULT_CELL_TIME = 100e6;	   // Used to normalize fitness.
 
 static const std::vector<Codon> STOP_CODONS = {N_UAA, N_UAG, N_UGA};
@@ -363,6 +365,7 @@ int main(int argc, char** argv)
     json json_log;
     std::ostream * outstream = &std::cout;
     double degradation_param = DEFAULT_DEGRADATION_PARAM;
+    double fitness_constant = DEFAULT_FITNESS_CONSTANT;
     uint64_t rng_seed = DEFAULT_SEED;
     enum MutationMode
     {
@@ -392,6 +395,7 @@ int main(int argc, char** argv)
      * NULL and 0 otherwise.
      */
     static struct option long_options[] = {
+	{"activity-constant", required_argument, NULL, 'a'},
 	{"from-checkpoint", required_argument, NULL, 'f'},
 	{"degradation-param", required_argument, NULL, 'k'},
 	{"mutation-mode", required_argument, NULL, 'm'},
@@ -409,7 +413,7 @@ int main(int argc, char** argv)
 	{NULL, 0, NULL, 0}
     };
 
-    while ((c = getopt_long(argc, argv, "f:k:m:n:o:p:r:s:t:dhz",
+    while ((c = getopt_long(argc, argv, "a:f:k:m:n:o:p:r:s:t:dhz",
 			    long_options, &option_index))
 	   != -1)
     {
@@ -422,6 +426,21 @@ int main(int argc, char** argv)
 	    // We are resuming from checkpoint.
 	    checkpoint_path = optarg;
 	    resume_from_checkpoint = true;
+	    break;
+	case 'a':
+	    try
+	    {
+		fitness_constant = std::stod(optarg);
+	    }
+	    catch (...)
+	    {
+		std::ostringstream err;
+		err << "Failed to convert fitness constant: "
+		    << optarg << std::endl;
+		print_error(err.str(), debug_mode);
+		exit(PARSE_ERROR);
+	    }
+	    debug_mode = true;
 	    break;
 	case 'd':
 	    debug_mode = true;
@@ -693,6 +712,7 @@ int main(int argc, char** argv)
 	json_log.at("simulations per gen").get_to(simulations_per_gen);
 	json_log.at("reevaluation size").get_to(checkpoint_reevaluation_size);
 	json_log.at("degradation timescale").get_to(degradation_param);
+	json_log.at("fitness constant").get_to(fitness_constant);
 	std::string latpack_share_path;
 	std::string current_latpack_share_path(getenv("LATPACK_SHARE"));
 	json_log.at("latpack share path").get_to(latpack_share_path);
@@ -887,6 +907,7 @@ int main(int argc, char** argv)
 	    json_log["simulations per gen"] = g_world_size;
 	    json_log["reevaluation size"] = reevaluation_size;
 	    json_log["degradation timescale"] = degradation_param;
+	    json_log["fitness constant"] = fitness_constant;
 	    json_log["latpack share path"] = getenv("LATPACK_SHARE");
 	    json_log["foldevo share path"] = getenv("FOLDEVO_SHARE");
 	    json_log["translation params"] = speedparams_path;
@@ -905,6 +926,7 @@ int main(int argc, char** argv)
 	    << "# simulations (no. reevaluations): " << g_world_size <<
 	    " (" << reevaluation_size << ")" << std::endl
 	    << "# degradation timescale : " << degradation_param << std::endl
+	    << "# fitness constant : " << fitness_constant << std::endl
 	    << "# rng seed : " << rng_seed << std::endl
 	    << "# translation params : " << speedparams_path << std::endl
 	    << "# latpack share : " << getenv("LATPACK_SHARE") << std::endl
@@ -998,7 +1020,8 @@ int main(int argc, char** argv)
 	    old_protein_output = reaverage_protein_output(
 		old_protein_output, protein_output, g_subcomm_size,
 		g_world_size, n_gens_without_accept);
-	    old_fitness = calculate_fitness(old_protein_output);
+	    old_fitness = calculate_fitness(
+		old_protein_output, fitness_constant);
 	}
 	else if (!proc_does_reevaluation)
 	{
@@ -1032,7 +1055,8 @@ int main(int argc, char** argv)
 	    protein_output = get_protein_output_avg(
 		hdf5_output_file.str(), &native_energy,
 		degradation_param, protein_length, total_translation_steps);
-	    fitness = calculate_fitness(protein_output);
+	    fitness = calculate_fitness(
+		protein_output, fitness_constant);
 	}
 	MPI_Bcast(&native_energy, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
 	MPI_Bcast(&fitness, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
