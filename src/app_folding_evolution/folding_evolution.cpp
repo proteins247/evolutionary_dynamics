@@ -1182,6 +1182,8 @@ int main(int argc, char** argv)
     // finalize json log
     write_log(json_log, json_log_path);
     
+    MPI_Barrier(MPI_COMM_WORLD);
+
     MPI_Comm_free(&g_subcomm);
     MPI_Finalize();
 
