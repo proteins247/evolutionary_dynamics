@@ -1848,10 +1848,16 @@ double get_protein_output_avg(
 	pnat = pnat * sum_weights + *old_pnat_average * *old_pnat_weight;
 	*old_pnat_weight += sum_weights;
 	pnat /= *old_pnat_weight;
+	*old_pnat_average = pnat;
 
 	// Now calculate protein output on a per trajectory basis
 	folding_times.insert(folding_times.end(), this_gen_folding_times.begin(),
 			     this_gen_folding_times.end());
+
+	if (pnat == 1)
+	{
+	    pnat = 1 - 1e-10;
+	}
 
 	double total_output = 0;
 	for (auto folding_time : folding_times)
@@ -1871,10 +1877,10 @@ double get_protein_output_avg(
     }
 
     // Now let everyone know
-    MPI_Bcast(&pnat, 1, MPI_DOUBLE, 0, g_subcomm);
+    MPI_Bcast(old_pnat_average, 1, MPI_DOUBLE, 0, g_subcomm);
     MPI_Bcast(old_pnat_weight, 1, MPI_DOUBLE, 0, g_subcomm);
     MPI_Bcast(&output_average, 1, MPI_DOUBLE, 0, g_subcomm);
-    *old_pnat_average = pnat;
+    pnat = *old_pnat_average;
 
     int folding_times_size = folding_times.size();
     MPI_Bcast(&folding_times_size, 1, MPI_INT, 0, g_subcomm);
