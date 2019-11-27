@@ -1,5 +1,5 @@
 /* 
- * folding_evolution version b0.0.14-draft1 (drafting)
+ * folding_evolution version b0.0.14-draft2 (drafting)
  *
  * branch: stability_only
  *
@@ -103,6 +103,13 @@ static const std::string helptext =
     "\n"
     ;
 
+enum MutationMode
+{
+    SynonymousOnly,
+    NonsynonymousOnly,
+    MutateAll
+};
+
 // error values
 static const int PARSE_ERROR = 1;
 static const int DATA_ERROR = 2;
@@ -116,7 +123,7 @@ static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_CHECKPOINT_FREQ = 10;
 static const int DEFAULT_JSON_OUTFREQ = 5;
 static const int DEFAULT_POPULATION_SIZE = 500;
-static const int DEFAULT_MUTATION_MODE = 2;    // MutateAll default value
+static const MutationMode DEFAULT_MUTATION_MODE = NonsynonymousOnly;
 static const double DEFAULT_TEMPERATURE = 0.2;
 // Not commandline options:
 static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
@@ -248,6 +255,12 @@ double reaverage_protein_output(
     int n_gens_without_accept);
 
 
+//
+std::vector<int> mutate_sequence(
+    const std::vector<int> & input_sequence,
+    MutationMode mutation_mode);
+
+
 // Print the header for simulation text log.
 void print_header(
     std::ostream * outstream,
@@ -326,18 +339,14 @@ int main(int argc, char** argv)
     std::string checkpoint_path;
     std::string lat_sim_out_path;
     std::string json_log_path;	// we're going to log using json
+    std::unordered_map<std::string, double> recorded_fitnesses;
     json checkpoint;
     json json_log;
     std::ostream * outstream = &std::cout;
     double degradation_param = DEFAULT_DEGRADATION_PARAM;
     double fitness_constant = DEFAULT_FITNESS_CONSTANT;
     uint64_t rng_seed = DEFAULT_SEED;
-    enum MutationMode
-    {
-	SynonymousOnly,
-	NonsynonymousOnly,
-	MutateAll
-    } mutation_mode = static_cast<MutationMode>(DEFAULT_MUTATION_MODE);
+    MutationMode mutation_mode = DEFAULT_MUTATION_MODE;
     double temperature = DEFAULT_TEMPERATURE;
     // End variables to be determined by commandline options: 
 
@@ -719,25 +728,36 @@ int main(int argc, char** argv)
 	}
 
 	// need to trim json log if it's too long
+	// also, we will reconstruct recorded_fitnesses
 	int checkpoint_generation;
 	checkpoint.at("generation").get_to(checkpoint_generation);
 	auto it = json_log.at("trajectory").begin();
+	std::string curr_seq = it->at("aa sequence");
+	std::string new_seq;
 	while (it != json_log.at("trajectory").end() &&
 	       it->at("generation") <= checkpoint_generation)
 	{
+	    new_seq = it->at("aa sequence");
+	    if (it->at("accepted"))
+	    {
+		recorded_fitnesses[curr_seq] = it->at("old fitness");
+		curr_seq = new_seq;
+	    }
+	    else
+	    {
+		recorded_fitnesses[new_seq] = it->at("new fitness");
+	    }
 	    ++it;
 	}
+
+	// auto it2 = it;
+	// for (; it2 != json_log.at("trajectory").end(); ++it2)
+	// {
+	//     recorded_fitnesses.erase(it2->at("aa sequence"));
+	// }
+
 	json_log.at("trajectory").erase(it, json_log.at("trajectory").end());
 
-	// for (auto it = json_log.at("trajectory").begin();
-	//      it != json_log.at("trajectory").end();
-	//      ++it)
-	// {
-	//     if (it->at("generation") > checkpoint_generation)
-	//     {
-	// 	json_log.at("trajectory").erase(it);
-	//     }
-	// }
     }
     
     // End option parsing
@@ -748,6 +768,7 @@ int main(int argc, char** argv)
     std::vector<int> nuc_sequence;
     std::vector<int> prev_nuc_sequence;
     std::vector<AminoAcid> aa_sequence;
+    std::vector<AminoAcid> prev_aa_sequence;
     std::vector<Codon> codon_sequence;
 
     // Infer lengths from folded conformation length
@@ -758,6 +779,7 @@ int main(int argc, char** argv)
     nuc_sequence.resize(nuc_length);
     prev_nuc_sequence.resize(nuc_length);
     aa_sequence.resize(protein_length);
+    prev_aa_sequence.resize(protein_length); // for recorded_fitnesses
     codon_sequence.resize(protein_length);
 
     if (!resume_from_checkpoint)
@@ -816,6 +838,7 @@ int main(int argc, char** argv)
 	    print_error(err.str(), debug_mode);
 	    exit(DATA_ERROR);
 	}
+	prev_aa_sequence = aa_sequence;
     }
     else			// resuming from checkpoint
     {
@@ -824,6 +847,7 @@ int main(int argc, char** argv)
 	checkpoint.at("nuc sequence").get_to(nuc_sequence);
 	checkpoint.at("previous nuc sequence").get_to(prev_nuc_sequence);
 	NucSeqToAASeq(nuc_sequence.data(), nuc_length, aa_sequence.data());
+	NucSeqToAASeq(prev_nuc_sequence.data(), nuc_length, prev_aa_sequence.data());
     }
 
     // Obtain a codon sequence from nuc_sequence
@@ -882,6 +906,7 @@ int main(int argc, char** argv)
     std::vector<std::string> latfold_command;
     std::vector<std::string> prev_latfold_command;
     std::unique_ptr<char []> aa_sequence_str(new char[protein_length+1]);
+    std::unique_ptr<char []> old_aa_sequence_str(new char[protein_length+1]); // the current accepted
 
     if (resume_from_checkpoint)
     {
@@ -1007,7 +1032,14 @@ int main(int argc, char** argv)
 	// Update / revert
 	if (accept)
 	{
-	    // Update so that nuc_sequence and fitness are fixed
+	    if (gen > 0)
+	    {
+		NucSeqToAASeq(prev_nuc_sequence.data(), nuc_length, prev_aa_sequence.data());
+		PrintAASequence(
+		    old_aa_sequence_str.get(), prev_aa_sequence.data(), protein_length);
+		recorded_fitnesses[old_aa_sequence_str.get()] = old_fitness;
+	    }
+	    // Update old/prev values to take on current sequence
 	    prev_nuc_sequence = nuc_sequence;
 	    prev_latfold_command = latfold_command;
 	    old_protein_output = protein_output;
@@ -1017,7 +1049,8 @@ int main(int argc, char** argv)
 	}
 	else
 	{
-	    // Revert
+	    // Revert, saving the fitness value
+	    recorded_fitnesses[aa_sequence_str.get()] = fitness;
 	    nuc_sequence = prev_nuc_sequence;
 	    n_gens_without_accept++;
 	}
@@ -1026,32 +1059,39 @@ int main(int argc, char** argv)
 	// independent rng streams for different nodes.
 	if (!g_world_rank)
 	{
-	    std::vector<int> temp_sequence;
-	    if (mutation_mode == NonsynonymousOnly)
+	    // We check if mutant sequence has been encountered before.
+	    std::vector<int> new_nuc_sequence;
+	    std::vector<AminoAcid> new_aa_sequence;
+	    new_aa_sequence.resize(protein_length);
+	    int infinite_loop_checker = 0;
+	    while (true)
 	    {
-		temp_sequence = nuc_sequence;
-		AAMutateNucSequence(temp_sequence.data(), nuc_length);
-		// This function should always work.
-		// Current bug: mutation_type is not set to 1
-	    }
-	    else		// synonymousonly == 0, mutateall == 2
-	    {
-		while (true)
+		new_nuc_sequence = mutate_sequence(nuc_sequence, mutation_mode);
+		NucSeqToAASeq(new_nuc_sequence.data(), nuc_length, new_aa_sequence.data());
+		PrintAASequence(
+		    aa_sequence_str.get(), new_aa_sequence.data(), protein_length);
+		auto result = recorded_fitnesses.find(aa_sequence_str.get());
+		if (result == recorded_fitnesses.end())
 		{
-		    temp_sequence = nuc_sequence;
-		    mutation_type = PointMutateNucSequence(
-			temp_sequence.data(), nuc_length);
-		    if (mutation_type == mutation_mode)
-			// mutation_type == mutation_mode == 0
+		    break;
+		}
+		else
+		{
+		    if (result->second >= old_fitness)
+		    {
 			break;
-		    if (mutation_mode == MutateAll && mutation_type >= 0)
-			// either
-			// mutation_type == 0
-			// mutation_type == 1
-			break;
+		    }
+		}
+
+		++infinite_loop_checker;
+		if (infinite_loop_checker > 10000)
+		{
+		    std::cerr << "# No new sequences / s>=0 sequences in 10000 mutation attempts. "
+			      << "Fitness maxima? Continuing with current mutant.\n";
+		    break;
 		}
 	    }
-	    nuc_sequence = temp_sequence;
+	    nuc_sequence = new_nuc_sequence;
 	}
 
 	MPI_Bcast(nuc_sequence.data(), nuc_sequence.size(), MPI_INT,
@@ -1080,6 +1120,7 @@ int main(int argc, char** argv)
 	    checkpoint["old protein output"]
 		= old_protein_output;
 	    checkpoint["prev latfold command"] = prev_latfold_command;
+	    checkpoint["recorded fitnesses"] = recorded_fitnesses;
 	    write_checkpoint(checkpoint_path.str(), checkpoint);
 	}
     }
@@ -1607,6 +1648,41 @@ double reaverage_protein_output(
     double new_factor = n_reevaluators
 	/ (double)(n_total + n_gens_without_accept * n_reevaluators);
     return old_protein_output * old_factor + new_protein_output * new_factor;
+}
+
+
+// Make a mutation
+std::vector<int> mutate_sequence(
+    const std::vector<int> & input_sequence,
+    MutationMode mutation_mode)
+{
+    std::vector<int> temp_sequence;
+    int mutation_type;
+    unsigned int nuc_length = input_sequence.size();
+    if (mutation_mode == NonsynonymousOnly)
+    {
+	temp_sequence = input_sequence;
+	AAMutateNucSequence(temp_sequence.data(), nuc_length);
+	// This function should always work.
+    }
+    else		// synonymousonly == 0, mutateall == 2
+    {
+	while (true)
+	{
+	    temp_sequence = input_sequence;
+	    mutation_type = PointMutateNucSequence(
+		temp_sequence.data(), nuc_length);
+	    if (mutation_type == mutation_mode)
+		// mutation_type == mutation_mode == 0
+		break;
+	    if (mutation_mode == MutateAll && mutation_type >= 0)
+		// either
+		// mutation_type == 0
+		// mutation_type == 1
+		break;
+	}
+    }
+    return temp_sequence;
 }
 
 
