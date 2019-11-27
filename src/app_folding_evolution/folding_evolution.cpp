@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cmath>
 #include <map>
+#include <limits>
 
 #include <getopt.h>
 #include <unistd.h>
@@ -258,6 +259,9 @@ double get_protein_output_avg(
     double degradation_param,
     double protein_length,
     double total_translation_steps,
+    double* old_pnat_average,
+    double* old_pnat_weight,
+    std::vector<double> &folding_times,
     double t_cell=DEFAULT_CELL_TIME);
 
 
@@ -271,21 +275,21 @@ double calculate_fitness(
     double f_0=DEFAULT_FITNESS_CONSTANT);
 
 
-// Update protein output to incorporate new folding simulations.
-//
-// @param old_protein_output The previously estimated protein output.
-// @param new_protein_output The newly estimated protein output.
-// @param n_reevaluators The number of simulations run to estimate
-//        the new fitness value.
-// @param n_total The total number of CPUs running simulations.
-// @param n_gens_without_accept Number of generations since last
-//        accepted mutation.
-double reaverage_protein_output(
-    double old_protein_output,
-    double new_protein_output,
-    int n_reevaluators,
-    int n_total,
-    int n_gens_without_accept);
+// // Update protein output to incorporate new folding simulations.
+// //
+// // @param old_protein_output The previously estimated protein output.
+// // @param new_protein_output The newly estimated protein output.
+// // @param n_reevaluators The number of simulations run to estimate
+// //        the new fitness value.
+// // @param n_total The total number of CPUs running simulations.
+// // @param n_gens_without_accept Number of generations since last
+// //        accepted mutation.
+// double reaverage_protein_output(
+//     double old_protein_output,
+//     double new_protein_output,
+//     int n_reevaluators,
+//     int n_total,
+//     int n_gens_without_accept);
 
 
 //
@@ -325,6 +329,8 @@ void save_state(
     double new_fitness,
     double old_protein_output,
     double new_protein_output,
+    double old_pnat,
+    double new_pnat,
     double native_energy,
     bool accept);
 
@@ -476,13 +482,23 @@ int main(int argc, char** argv)
 		switch (std::stoi(optarg))
 		{
 		case 0:
-		    mutation_mode = SynonymousOnly;
+		    // mutation_mode = SynonymousOnly;
+		    mutation_mode = NonsynonymousOnly;
+		    std::cerr << "Fitness saving means only mutation-mode 1 is supported"
+			      << std::endl;
+		    std::cerr << "Switching mutation mode to Nonsynonymousonly"
+			      << std::endl;
 		    break;
 		case 1:
 		    mutation_mode = NonsynonymousOnly;
 		    break;
 		case 2:
-		    mutation_mode = MutateAll;
+		    // mutation_mode = MutateAll;
+		    mutation_mode = NonsynonymousOnly;
+		    std::cerr << "Fitness saving means only mutation-mode 1 is supported"
+			      << std::endl;
+		    std::cerr << "Switching mutation mode to Nonsynonymousonly"
+			      << std::endl;
 		    break;
 		default:
 		    throw std::invalid_argument("Mutation mode not one of 0, 1, 2");
@@ -818,9 +834,9 @@ int main(int argc, char** argv)
 
     // Process the user-provided sequence
     std::vector<int> nuc_sequence;
-    std::vector<int> prev_nuc_sequence;
+    std::vector<int> old_nuc_sequence;
     std::vector<AminoAcid> aa_sequence;
-    std::vector<AminoAcid> prev_aa_sequence;
+    std::vector<AminoAcid> old_aa_sequence;
     std::vector<Codon> codon_sequence;
 
     // Infer lengths from folded conformation length
@@ -829,9 +845,9 @@ int main(int argc, char** argv)
 
     // Resize vectors
     nuc_sequence.resize(nuc_length);
-    prev_nuc_sequence.resize(nuc_length);
+    old_nuc_sequence.resize(nuc_length);
     aa_sequence.resize(protein_length);
-    prev_aa_sequence.resize(protein_length); // for recorded_fitnesses
+    old_aa_sequence.resize(protein_length); // for recorded_fitnesses
     codon_sequence.resize(protein_length);
 
     if (!resume_from_checkpoint)
@@ -890,16 +906,14 @@ int main(int argc, char** argv)
 	    print_error(err.str(), debug_mode);
 	    exit(DATA_ERROR);
 	}
-	prev_aa_sequence = aa_sequence;
     }
     else			// resuming from checkpoint
     {
 	nuc_sequence.clear();
-	prev_nuc_sequence.clear();
+	old_nuc_sequence.clear();
 	checkpoint.at("nuc sequence").get_to(nuc_sequence);
-	checkpoint.at("previous nuc sequence").get_to(prev_nuc_sequence);
+	checkpoint.at("old nuc sequence").get_to(old_nuc_sequence);
 	NucSeqToAASeq(nuc_sequence.data(), nuc_length, aa_sequence.data());
-	NucSeqToAASeq(prev_nuc_sequence.data(), nuc_length, prev_aa_sequence.data());
     }
 
     // Obtain a codon sequence from nuc_sequence
@@ -978,12 +992,18 @@ int main(int argc, char** argv)
     double fitness;
     double old_protein_output = 0;
     double protein_output;
+    double pnat_average;
+    double old_pnat_average;
+    double pnat_weight;
+    double old_pnat_weight;
     double native_energy;
     double selection;
     double fixation;
     std::string translation_schedule;
+    std::vector<double> folding_times;
+    std::vector<double> old_folding_times;
     std::vector<std::string> latfoldvec_command;
-    std::vector<std::string> prev_latfoldvec_command;
+    std::vector<std::string> old_latfoldvec_command;
     std::unique_ptr<char []> aa_sequence_str(new char[protein_length+1]); // the current trial sequence
     std::unique_ptr<char []> old_aa_sequence_str(new char[protein_length+1]); // the current accepted
 
@@ -999,8 +1019,11 @@ int main(int argc, char** argv)
 	checkpoint.at("mutation type").get_to(mutation_type);
 	checkpoint.at("old fitness").get_to(old_fitness);
 	checkpoint.at("old protein output").get_to(old_protein_output);
-	checkpoint.at("prev latfoldvec command").get_to(
-	    prev_latfoldvec_command);
+	checkpoint.at("old latfoldvec command").get_to(
+	    old_latfoldvec_command);
+	checkpoint.at("old pnat average").get_to(old_pnat_average);
+	checkpoint.at("old pnat weight").get_to(old_pnat_weight);
+	checkpoint.at("old folding times").get_to(old_folding_times);
     }
 
     // Begin running simulation loop
@@ -1026,6 +1049,11 @@ int main(int argc, char** argv)
 	    latfold_output_frequency,
 	    degradation_scale_steps);
 
+	// Reset these variables for new eval
+	pnat_average = 0;
+	pnat_weight = 0;
+	folding_times.clear();
+
 	if (proc_does_reevaluation && gen > 0)
 	{
 	    std::ostringstream output_dir;
@@ -1036,15 +1064,16 @@ int main(int argc, char** argv)
 			     << std::setw(5) << n_gens_without_accept + 1
 			     << "_" << std::setw(5) << g_subcomm_rank << ".h5";
 
-	    run_latfoldvec(prev_latfoldvec_command, hdf5_output_file.str());
-	    protein_output = get_protein_output_avg(
+	    run_latfoldvec(old_latfoldvec_command, hdf5_output_file.str());
+	    old_protein_output = get_protein_output_avg(
 		hdf5_output_file.str(), &native_energy,
-		degradation_param, protein_length, old_total_translation_steps);
+		degradation_param, protein_length, old_total_translation_steps,
+		&old_pnat_average, &old_pnat_weight, old_folding_times);
 
-	    // Now update old fitness
-	    old_protein_output = reaverage_protein_output(
-		old_protein_output, protein_output, g_subcomm_size,
-		g_world_size, n_gens_without_accept);
+	    // // Now update old fitness
+	    // old_protein_output = reaverage_protein_output(
+	    // 	old_protein_output, protein_output, g_subcomm_size,
+	    // 	g_world_size, n_gens_without_accept);
 	    old_fitness = calculate_fitness(
 		old_protein_output, fitness_constant);
 	}
@@ -1079,15 +1108,37 @@ int main(int argc, char** argv)
 	    run_latfoldvec(latfoldvec_command, hdf5_output_file.str());
 	    protein_output = get_protein_output_avg(
 		hdf5_output_file.str(), &native_energy,
-		degradation_param, protein_length, total_translation_steps);
+		degradation_param, protein_length, total_translation_steps,
+		&pnat_average, &pnat_weight, folding_times);
 	    fitness = calculate_fitness(
 		protein_output, fitness_constant);
 	}
+
+	// Synchronize data between all ranks, including between
+	// reevaluators and evaluators. ranks [0, reevaluation_size)
+	// looks at old sequence whereas [reevaluation_size,
+	// g_world_size) does new evaluation
 	MPI_Bcast(&native_energy, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
 	MPI_Bcast(&fitness, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
 	MPI_Bcast(&protein_output, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
+	MPI_Bcast(&pnat_average, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
+	MPI_Bcast(&pnat_weight, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
 	MPI_Bcast(&old_fitness, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 	MPI_Bcast(&old_protein_output, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	MPI_Bcast(&old_pnat_average, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	MPI_Bcast(&old_pnat_weight, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+	int folding_times_size = folding_times.size();
+	MPI_Bcast(&folding_times_size, 1, MPI_INT, g_world_size - 1, MPI_COMM_WORLD);
+	folding_times.resize(folding_times_size);
+	MPI_Bcast(folding_times.data(), folding_times_size, MPI_DOUBLE,
+		  g_world_size - 1, MPI_COMM_WORLD);
+
+	int old_folding_times_size = old_folding_times.size();
+	MPI_Bcast(&old_folding_times_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+	old_folding_times.resize(old_folding_times_size);
+	MPI_Bcast(old_folding_times.data(), old_folding_times_size, MPI_DOUBLE,
+		  0, MPI_COMM_WORLD);
 
 	selection = (fitness / old_fitness) - 1;
 	if (selection == 0.)
@@ -1111,8 +1162,8 @@ int main(int argc, char** argv)
 			fitness, native_energy, accept);
 	    save_state(json_log, gen, n_gens_without_accept, mutation_type,
 		       aa_sequence, nuc_sequence, old_fitness, fitness,
-		       old_protein_output, protein_output, native_energy,
-		       (bool)accept);
+		       old_protein_output, protein_output, old_pnat_average,
+		       pnat_average, native_energy, (bool)accept);
 	    if (gen % DEFAULT_JSON_OUTFREQ == 0)
 	    {
 		write_log(json_log, json_log_path);
@@ -1127,25 +1178,28 @@ int main(int argc, char** argv)
 	{
 	    if (gen > 0)
 	    {
-		NucSeqToAASeq(prev_nuc_sequence.data(), nuc_length, prev_aa_sequence.data());
+		NucSeqToAASeq(old_nuc_sequence.data(), nuc_length, old_aa_sequence.data());
 		PrintAASequence(
-		    old_aa_sequence_str.get(), prev_aa_sequence.data(), protein_length);
+		    old_aa_sequence_str.get(), old_aa_sequence.data(), protein_length);
 		recorded_fitnesses[old_aa_sequence_str.get()] = old_fitness;
 	    }
-	    // Update old/prev values to take on current sequence
-	    prev_nuc_sequence = nuc_sequence;
-	    prev_latfoldvec_command = latfoldvec_command;
+	    // Update old values to take on current sequence
+	    old_nuc_sequence = nuc_sequence;
+	    old_latfoldvec_command = latfoldvec_command;
 	    old_total_translation_steps = total_translation_steps;
 	    old_protein_output = protein_output;
 	    old_fitness = fitness;
 	    n_gens_without_accept = 0;
 	    last_accepted_gen = gen;
+	    old_pnat_average = pnat_average;
+	    old_pnat_weight = pnat_weight;
+	    old_folding_times = folding_times;
 	}
 	else
 	{
 	    // Revert, saving the fitness value
 	    recorded_fitnesses[aa_sequence_str.get()] = fitness;
-	    nuc_sequence = prev_nuc_sequence;
+	    nuc_sequence = old_nuc_sequence;
 	    n_gens_without_accept++;
 	}
 
@@ -1205,17 +1259,18 @@ int main(int argc, char** argv)
 
 	    checkpoint["generation"] = gen;
 	    checkpoint["nuc sequence"] = nuc_sequence;
-	    checkpoint["previous nuc sequence"] = prev_nuc_sequence;
+	    checkpoint["old nuc sequence"] = old_nuc_sequence;
 	    checkpoint["old total translation steps"] =
 		old_total_translation_steps;
 	    checkpoint["last accepted gen"] = last_accepted_gen;
-	    checkpoint["n gens without accept"] =
-		n_gens_without_accept;
+	    checkpoint["n gens without accept"] = n_gens_without_accept;
 	    checkpoint["mutation type"] = mutation_type;
 	    checkpoint["old fitness"] = old_fitness;
-	    checkpoint["old protein output"]
-		= old_protein_output;
-	    checkpoint["prev latfoldvec command"] = prev_latfoldvec_command;
+	    checkpoint["old protein output"] = old_protein_output;
+	    checkpoint["old latfoldvec command"] = old_latfoldvec_command;
+	    checkpoint["old pnat average"] = old_pnat_average;
+	    checkpoint["old pnat weight"] = old_pnat_weight;
+	    checkpoint["old folding times"] = old_folding_times;
 	    checkpoint["recorded fitnesses"] = recorded_fitnesses;
 	    write_checkpoint(checkpoint_path.str(), checkpoint);
 	}
@@ -1697,11 +1752,11 @@ double get_protein_output_avg(
     double degradation_param,
     double protein_length,
     double total_translation_steps,
+    double* old_pnat_average,
+    double* old_pnat_weight,
+    std::vector<double> &folding_times,
     double t_cell)
 {
-    double output = 0;
-    double total_output = 0;
-
     // We need to read data from HDF5 file
     int error_count = 0;
     hid_t file_id;
@@ -1724,43 +1779,105 @@ double get_protein_output_avg(
     hid_t group_id = H5Gopen2(file_id, "traj1", H5P_DEFAULT);
 
     // Read relevant attributes from 'traj1'
-    hid_t output_attr = H5Aopen(group_id, "Protein output",
-				H5P_DEFAULT);
     hid_t pnat_attr = H5Aopen(group_id, "Fraction target conf",
 			      H5P_DEFAULT);
     hid_t steps_attr = H5Aopen(group_id, "Steps to target",
 			       H5P_DEFAULT);
+    hid_t last_step_attr = H5Aopen(group_id, "Last step",
+				   H5P_DEFAULT);
     hid_t conf_energy_attr = H5Aopen(group_id, "Target conf energy",
 				     H5P_DEFAULT);
-    double conf_energy = 0;
     double pnat = 0;
     double steps_to_target = 0;
+    double last_step = 0;
+    double conf_energy = 0;
 
-    H5Aread(output_attr, H5T_NATIVE_DOUBLE, &output);
     H5Aread(pnat_attr, H5T_NATIVE_DOUBLE, &pnat);
     H5Aread(steps_attr, H5T_NATIVE_DOUBLE, &steps_to_target);
+    H5Aread(last_step_attr, H5T_NATIVE_DOUBLE, &last_step);
     H5Aread(conf_energy_attr, H5T_NATIVE_DOUBLE, &conf_energy);
 
-    H5Aclose(output_attr);
+    H5Aclose(conf_energy_attr);
+    H5Aclose(last_step_attr);
+    H5Aclose(steps_attr);
     H5Aclose(pnat_attr);
-    H5Aclose(conf_energy_attr);    
     H5Gclose(group_id);
     H5Fclose(file_id);
+    // End reading hdf5 file
 
-    // Normalize protein output
-    if (pnat == 1)
+    // Get a weighted average for pnat. Gather everything on root.
+    std::vector<double> pnats(g_subcomm_size);
+    std::vector<double> pnat_weights(g_subcomm_size);
+    std::vector<double> this_gen_folding_times(g_subcomm_size);
+    double pnat_weight;
+    double folding_time;
+    if (steps_to_target == 0)
     {
-	pnat = 1 - 1e-10;
+	pnat_weight = 0;
+	folding_time = std::numeric_limits<double>::infinity();
     }
-    double folding_time = (steps_to_target - total_translation_steps) / protein_length;
-    output /= protein_length;
-    output *= (1 - exp(
-		   -(t_cell - folding_time)
-		   * (1 - pnat) / degradation_param)) / t_cell;
+    else
+    {
+	pnat_weight = last_step - steps_to_target;
+	folding_time = (steps_to_target - total_translation_steps)
+	    / protein_length;
+    }
 
-    MPI_Allreduce(&output, &total_output, 1, MPI_DOUBLE,
-		  MPI_SUM, g_subcomm);
-    double output_average = total_output / (double)g_subcomm_size;
+    MPI_Gather(&pnat, 1, MPI_DOUBLE, pnats.data(),
+	       1, MPI_DOUBLE, 0, g_subcomm);
+    MPI_Gather(&pnat_weight, 1, MPI_DOUBLE, pnat_weights.data(),
+	       1, MPI_DOUBLE, 0, g_subcomm);
+    MPI_Gather(&folding_time, 1, MPI_DOUBLE, this_gen_folding_times.data(),
+	       1, MPI_DOUBLE, 0, g_subcomm);
+
+    double output_average;
+    if (g_subcomm_rank == 0)
+    {
+	double weighted_sum = 0;
+	double sum_weights = 0;
+	for (unsigned int i = 0; i < pnats.size(); ++i)
+	{
+	    weighted_sum += pnats[i] * pnat_weights[i];
+	    sum_weights += pnat_weights[i];
+	}
+	pnat = weighted_sum / sum_weights;
+
+	// Now account for old:
+	pnat = pnat * sum_weights + *old_pnat_average * *old_pnat_weight;
+	*old_pnat_weight += sum_weights;
+	pnat /= *old_pnat_weight;
+
+	// Now calculate protein output on a per trajectory basis
+	folding_times.insert(folding_times.end(), this_gen_folding_times.begin(),
+			     this_gen_folding_times.end());
+
+	double total_output = 0;
+	for (auto folding_time : folding_times)
+	{
+	    if (isinf(folding_time))
+	    {
+		continue;
+	    }
+	    double output = exp(-folding_time / degradation_param);
+	    output *= degradation_param * pnat / (1 - pnat);
+	    output *= (1 - exp(
+			   -(t_cell - folding_time)
+			   * (1 - pnat) / degradation_param)) / t_cell;
+	    total_output += output;
+	}
+	output_average = total_output / (double)folding_times.size();
+    }
+
+    // Now let everyone know
+    MPI_Bcast(&pnat, 1, MPI_DOUBLE, 0, g_subcomm);
+    MPI_Bcast(old_pnat_weight, 1, MPI_DOUBLE, 0, g_subcomm);
+    MPI_Bcast(&output_average, 1, MPI_DOUBLE, 0, g_subcomm);
+    *old_pnat_average = pnat;
+
+    int folding_times_size = folding_times.size();
+    MPI_Bcast(&folding_times_size, 1, MPI_INT, 0, g_subcomm);
+    folding_times.resize(folding_times_size);
+    MPI_Bcast(folding_times.data(), folding_times_size, MPI_DOUBLE, 0, g_subcomm);
 
     // Also determine native energy
     MPI_Allreduce(&conf_energy, native_energy, 1, MPI_DOUBLE, MPI_MIN,
@@ -1781,21 +1898,21 @@ double calculate_fitness(
 }
 
 
-// Update protein output to incorporate new folding simulations.
-double reaverage_protein_output(
-    double old_protein_output,
-    double new_protein_output,
-    int n_reevaluators,
-    int n_total,
-    int n_gens_without_accept)
-{
-    // We calculate a weighted average, so here we get the weights.
-    double old_factor = (n_total + n_reevaluators * (n_gens_without_accept - 1))
-	/ (double)(n_total + n_gens_without_accept * n_reevaluators);
-    double new_factor = n_reevaluators
-	/ (double)(n_total + n_gens_without_accept * n_reevaluators);
-    return old_protein_output * old_factor + new_protein_output * new_factor;
-}
+// // Update protein output to incorporate new folding simulations.
+// double reaverage_protein_output(
+//     double old_protein_output,
+//     double new_protein_output,
+//     int n_reevaluators,
+//     int n_total,
+//     int n_gens_without_accept)
+// {
+//     // We calculate a weighted average, so here we get the weights.
+//     double old_factor = (n_total + n_reevaluators * (n_gens_without_accept - 1))
+// 	/ (double)(n_total + n_gens_without_accept * n_reevaluators);
+//     double new_factor = n_reevaluators
+// 	/ (double)(n_total + n_gens_without_accept * n_reevaluators);
+//     return old_protein_output * old_factor + new_protein_output * new_factor;
+// }
 
 
 // Make a mutation
@@ -1916,6 +2033,8 @@ void save_state(
     double new_fitness,
     double old_protein_output,
     double new_protein_output,
+    double old_pnat,
+    double new_pnat,
     double native_energy,
     bool accept)
 {
@@ -1944,6 +2063,8 @@ void save_state(
     entry["new fitness"] = new_fitness;
     entry["old protein output"] = old_protein_output;
     entry["new protein output"] = new_protein_output;
+    entry["old pnat"] = old_pnat;
+    entry["new pnat"] = new_pnat;
     entry["native energy"] = native_energy;
     entry["accepted"] = accept;
     json_log["trajectory"].push_back(entry);
