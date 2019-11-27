@@ -1814,7 +1814,9 @@ double get_protein_output_avg(
     if (steps_to_target == 0)
     {
 	pnat_weight = 0;
-	folding_time = std::numeric_limits<double>::infinity();
+	folding_time = -1;
+	// Use negative number to indicate failure to fold
+	// Easier for json serialization
     }
     else
     {
@@ -1854,7 +1856,7 @@ double get_protein_output_avg(
 	double total_output = 0;
 	for (auto folding_time : folding_times)
 	{
-	    if (isinf(folding_time))
+	    if (folding_time < 0)
 	    {
 		continue;
 	    }
