@@ -1662,6 +1662,12 @@ double get_protein_output_avg(
 	pnat = pnat * sum_weights + *old_pnat_average * *old_pnat_weight;
 	*old_pnat_weight += sum_weights;
 	pnat /= *old_pnat_weight;
+	*old_pnat_average = pnat;
+
+	if (pnat == 1)
+	{
+	    pnat = 1 - 1e-10;
+	}
 
 	output_average = degradation_param * pnat / (1 - pnat);
 	output_average *= (1 - exp(-t_cell * (1 - pnat)
@@ -1669,10 +1675,10 @@ double get_protein_output_avg(
     }
 
     // Now let everyone know
-    MPI_Bcast(&pnat, 1, MPI_DOUBLE, 0, g_subcomm);
+    MPI_Bcast(old_pnat_average, 1, MPI_DOUBLE, 0, g_subcomm);
     MPI_Bcast(old_pnat_weight, 1, MPI_DOUBLE, 0, g_subcomm);
     MPI_Bcast(&output_average, 1, MPI_DOUBLE, 0, g_subcomm);
-    *old_pnat_average = pnat;
+    pnat = *old_pnat_average;
 
     // Also determine native energy
     MPI_Allreduce(&conf_energy, native_energy, 1, MPI_DOUBLE, MPI_MIN,
