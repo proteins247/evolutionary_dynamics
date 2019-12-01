@@ -993,7 +993,7 @@ int main(int argc, char** argv)
     double old_protein_output = 0;
     double protein_output;
     double pnat_average;
-    double old_pnat_average;
+    double old_pnat_average = 0;
     double pnat_weight;
     double old_pnat_weight;
     double native_energy;
@@ -1843,6 +1843,11 @@ double get_protein_output_avg(
 	    sum_weights += pnat_weights[i];
 	}
 	pnat = weighted_sum / sum_weights;
+
+	if (std::isnan(pnat))
+	{
+	    pnat = 0;
+	}
 
 	// Now account for old:
 	pnat = pnat * sum_weights + *old_pnat_average * *old_pnat_weight;
