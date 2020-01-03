@@ -1,7 +1,7 @@
 /* 
- * folding_evolution v0.0.14 draft
+ * folding_evolution v0.0.14
  *
- * v0.0.14 draft
+ * v0.0.14
  *
  */
 
@@ -99,7 +99,7 @@ static const std::string helptext =
     "                            Default=0.2\n"
     "  -z, --instant-release     Release from ribosome immediately after\n"
     "                            translation.\n"
-    "      --help   Display this help and exit.\n"
+    "      --help                Display this help and exit.\n"
     "\n"
     "Format of the output files:\n"
     "\nThe primary output is a simulation log that records the generation\n"
@@ -1741,7 +1741,6 @@ void run_latfoldvec(
 // 	}
 //     }    
 // }
-
 
 
 // Analyze latFoldVec simulations to average protein output.
