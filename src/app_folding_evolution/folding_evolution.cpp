@@ -1,7 +1,7 @@
 /* 
- * folding_evolution v0.0.14
+ * folding_evolution translation rate branch 
  *
- * v0.0.14
+ * d0.0.15-draft1 
  *
  */
 
@@ -73,8 +73,7 @@ static const std::string helptext =
     "\n"
     "  -n, --native-fold=CONF    REQUIRED. The native conformation of the\n"
     "                            as a latPack-style move sequence.\n"
-    "  -s, --speed-params=FILE   REQUIRED. Path to file with translation\n"
-    "                            times of the codons.\n"
+    "  -e, --elongation-interval=SPEED  REQUIRED. Elongation rate\n"
     "  -a, --activity-constant   Set constant in fitness function.\n"
     "                            Default=0.25\n"
     "  -d, --debug               Allow error messages from all processors.\n"
@@ -82,19 +81,14 @@ static const std::string helptext =
     "  -k, --degradation-param=K Value setting timescale for protein\n"
     "                            degradation (penalizes slow folding and\n"
     "                            low stability).\n"
-    "  -m, --mutation-mode=M     One of 0, 1, or 2, indicating restriction to\n"
-    "                            synonymous mutation, nonsynonymous mutation,\n"
-    "                            or allow both kinds of mutations (default).\n"
     "      --new-ngens=N         When resuming from checkpoint, change the\n"
     "                            target number of generations."    
     "  -o, --out-path=FILE       Output will be put in this directory.\n"
     "                            Default=./out\n"
     "  -p, --population-size=N   Size of population for evolutionary\n"
     "                            dynamics. Default=500\n"
-    "      --random-codons       If SEQUENCE is of amino acids, corresponding\n"
-    "                            RNA sequence codons will be randomly chosen.\n"
-    "                            (Default behavior is to use fastest codons.)\n"
     "  -r, --seed=N              RNG seed. Default=1\n"
+    "  -s, --single-mutation     Stop simulation after single mutation.\n"
     "  -t, --temperature=T       Temperature of latFoldVec simulations.\n"
     "                            Default=0.2\n"
     "  -z, --instant-release     Release from ribosome immediately after\n"
@@ -108,7 +102,7 @@ static const std::string helptext =
     "\n"
     ;
 
-enum MutationMode
+enum MutationMode		// although only SynonymousOnly supported
 {
     SynonymousOnly,
     NonsynonymousOnly,
@@ -128,17 +122,15 @@ static const uint64_t DEFAULT_SEED = 1;
 static const int DEFAULT_CHECKPOINT_FREQ = 10;
 static const int DEFAULT_JSON_OUTFREQ = 5;
 static const int DEFAULT_POPULATION_SIZE = 500;
-static const MutationMode DEFAULT_MUTATION_MODE = NonsynonymousOnly;
 static const double DEFAULT_TEMPERATURE = 0.2;
+static const double DEFAULT_DEGRADATION_PARAM = 1000000;
 // Not commandline options:
-static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
+static const MutationMode DEFAULT_MUTATION_MODE = SynonymousOnly;
+static const int DEFAULT_SLOW_MULTIPLIER = 10;
+static const int DEFAULT_LATFOLD_OUTFREQ = 270000;
 static const double DEFAULT_REEVALUATION_RATIO = 0.25;
 static const double DEFAULT_FITNESS_CONSTANT = 0.25;
-static const double DEFAULT_DEGRADATION_PARAM = 1000000;
-static const double DEFAULT_POSTTRANSLATION_TIME = 0.75e6; // This is no longer used
 static const double DEFAULT_CELL_TIME = 100e6;	   // Used to normalize fitness.
-
-static const std::vector<Codon> STOP_CODONS = {N_UAA, N_UAG, N_UGA};
 
 // For now these variables for MPI will be global
 // until a better revision of the code
@@ -199,9 +191,10 @@ std::vector<char *> string_vec_to_cstring_vec(
 //   to the given codon sequence to be used for the
 //   -elongationSchedule argument in latFoldVec.
 std::string make_translation_schedule(
-    const std::vector<unsigned int> & times,
-    const std::vector<Codon> & codon_sequence,
-    const int final_time,
+    int elongation_interval,
+    int slow_elongation_interval,
+    std::vector<int> slow_codon_sequence,
+    int final_time,
     int* total_translation_steps);
 
 
@@ -275,24 +268,6 @@ double calculate_fitness(
     double f_0=DEFAULT_FITNESS_CONSTANT);
 
 
-// // Update protein output to incorporate new folding simulations.
-// //
-// // @param old_protein_output The previously estimated protein output.
-// // @param new_protein_output The newly estimated protein output.
-// // @param n_reevaluators The number of simulations run to estimate
-// //        the new fitness value.
-// // @param n_total The total number of CPUs running simulations.
-// // @param n_gens_without_accept Number of generations since last
-// //        accepted mutation.
-// double reaverage_protein_output(
-//     double old_protein_output,
-//     double new_protein_output,
-//     int n_reevaluators,
-//     int n_total,
-//     int n_gens_without_accept);
-
-
-//
 std::vector<int> mutate_sequence(
     const std::vector<int> & input_sequence,
     MutationMode mutation_mode);
@@ -301,8 +276,7 @@ std::vector<int> mutate_sequence(
 // Print the header for simulation text log.
 void print_header(
     std::ostream * outstream,
-    const std::vector<AminoAcid> & aa_sequence,
-    const std::vector<int> & nuc_sequence);
+    const std::vector<AminoAcid> & aa_sequence);
 
 
 // Print out current state.
@@ -310,7 +284,7 @@ void print_state(
     std::ostream * outstream,
     int generation,
     std::vector<AminoAcid> & aa_sequence,
-    std::vector<int> & nuc_sequence,
+    std::vector<int> & slow_codon_sequence,
     double old_fitness,
     double new_fitness,
     double native_energy,
@@ -324,7 +298,7 @@ void save_state(
     int n_gens_without_accept,
     int mutation_type,
     std::vector<AminoAcid> & aa_sequence,
-    std::vector<int> & nuc_sequence,
+    std::vector<int> & slow_codon_sequence,
     double old_fitness,
     double new_fitness,
     double old_protein_output,
@@ -370,20 +344,22 @@ int main(int argc, char** argv)
 
     // Other params:
     bool debug_mode = false;
+    bool single_mutation_mode = false;
     bool resume_from_checkpoint = false;
     bool instant_ribosome_release = false;
-    int random_codons = 0;
+    bool speedparam_provided = false;
     int population_size = DEFAULT_POPULATION_SIZE;
     std::string folded_conformation;
-    std::string speedparams_path;
     std::string out_path = DEFAULT_OUTPATH;
     std::string checkpoint_path;
     std::string lat_sim_out_path;
     std::string json_log_path;	// we're going to log using json
-    std::unordered_map<std::string, double> recorded_fitnesses;
     json checkpoint;
     json json_log;
     std::ostream * outstream = &std::cout;
+    int elongation_interval;
+    int slow_elongation_interval;
+    int slow_multiplier = DEFAULT_SLOW_MULTIPLIER;
     double degradation_param = DEFAULT_DEGRADATION_PARAM;
     double fitness_constant = DEFAULT_FITNESS_CONSTANT;
     uint64_t rng_seed = DEFAULT_SEED;
@@ -411,16 +387,15 @@ int main(int argc, char** argv)
      */
     static struct option long_options[] = {
 	{"activity-constant", required_argument, NULL, 'a'},
+	{"elongation-interval", required_argument, NULL, 'e'},
 	{"from-checkpoint", required_argument, NULL, 'f'},
 	{"degradation-param", required_argument, NULL, 'k'},
-	{"mutation-mode", required_argument, NULL, 'm'},
 	{"native-fold", required_argument, NULL, 'n'},
 	{"new-ngens", required_argument, NULL, 2},
-	{"random-codons", no_argument, &random_codons, 1},
 	{"out-path", required_argument, NULL, 'o'},
 	{"population-size", required_argument, NULL, 'p'},
 	{"seed", required_argument, NULL, 'r'},
-	{"speed-params", required_argument, NULL, 's'},
+	{"single-mutation", no_argument, NULL, 's'},
 	{"temperature", required_argument, NULL, 't'},
 	{"debug", no_argument, NULL, 'd'},
 	{"help", no_argument, NULL, 'h'},
@@ -428,12 +403,14 @@ int main(int argc, char** argv)
 	{NULL, 0, NULL, 0}
     };
 
-    while ((c = getopt_long(argc, argv, "a:f:k:m:n:o:p:r:s:t:dhz",
+    while ((c = getopt_long(argc, argv, "a:e:f:k:n:o:p:r:s:t:dhsz",
 			    long_options, &option_index))
 	   != -1)
     {
 	switch (c)
 	{
+	case 0:
+	    break;
 	case 'h':
 	    print_help();
 	    exit(0);
@@ -460,7 +437,21 @@ int main(int argc, char** argv)
 	case 'd':
 	    debug_mode = true;
 	    break;
-	case 0:
+	case 'e':
+	    // should check elongation_interval is not negative
+	    try
+	    {
+		elongation_interval = std::stoi(optarg);
+		slow_elongation_interval = elongation_interval * slow_multiplier;
+	    }
+	    catch (...)
+	    {
+		std::ostringstream err;
+		err << "Failed to convert speed: " << optarg << std::endl;
+		print_error(err.str(), debug_mode);
+		exit(PARSE_ERROR);
+	    }
+	    speedparam_provided = true;	    
 	    break;
 	case 'k':
 	    try
@@ -471,43 +462,6 @@ int main(int argc, char** argv)
 	    {
 		std::ostringstream err;
 		err << "Failed to convert degradation-param to float: "
-		    << optarg << std::endl;
-		print_error(err.str(), debug_mode);
-		exit(PARSE_ERROR);
-	    }
-	    break;
-	case 'm':
-	    try
-	    {
-		switch (std::stoi(optarg))
-		{
-		case 0:
-		    // mutation_mode = SynonymousOnly;
-		    mutation_mode = NonsynonymousOnly;
-		    std::cerr << "Fitness saving means only mutation-mode 1 is supported"
-			      << std::endl;
-		    std::cerr << "Switching mutation mode to Nonsynonymousonly"
-			      << std::endl;
-		    break;
-		case 1:
-		    mutation_mode = NonsynonymousOnly;
-		    break;
-		case 2:
-		    // mutation_mode = MutateAll;
-		    mutation_mode = NonsynonymousOnly;
-		    std::cerr << "Fitness saving means only mutation-mode 1 is supported"
-			      << std::endl;
-		    std::cerr << "Switching mutation mode to Nonsynonymousonly"
-			      << std::endl;
-		    break;
-		default:
-		    throw std::invalid_argument("Mutation mode not one of 0, 1, 2");
-		}
-	    }
-	    catch (...)
-	    {
-		std::ostringstream err;
-		err << "--mutation-mode argument not one of 0, 1, 2: "
 		    << optarg << std::endl;
 		print_error(err.str(), debug_mode);
 		exit(PARSE_ERROR);
@@ -561,9 +515,10 @@ int main(int argc, char** argv)
 	    }
 	    break;
 	case 's':
-	    speedparams_path = optarg;
+	    single_mutation_mode = true;
 	    break;
 	case 't':
+	    // should check that temperature > 0
 	    try
 	    {
 		temperature = std::stod(optarg);
@@ -571,7 +526,7 @@ int main(int argc, char** argv)
 	    catch (...)
 	    {
 		std::ostringstream err;
-		err << "Failed to convert temp: " << optarg << std::endl;
+		err << "Failed to convert temperature: " << optarg << std::endl;
 		print_error(err.str(), debug_mode);
 		exit(PARSE_ERROR);
 	    }
@@ -651,9 +606,9 @@ int main(int argc, char** argv)
 	    print_error(err.str(), debug_mode);
 	    exit(PARSE_ERROR);
 	}
-	if (speedparams_path.empty())
+	if (!speedparam_provided)
 	{
-	    std::cerr << "Argument --speed-params (-s) is mandatory"
+	    std::cerr << "Argument --speed-param (-s) is mandatory"
 		      << std::endl;
 	    exit(PARSE_ERROR);
 	}
@@ -715,7 +670,7 @@ int main(int argc, char** argv)
 	checkpoint.at("out path").get_to(out_path);
 	checkpoint.at("json log path").get_to(json_log_path);
 	checkpoint.at("lat sim path").get_to(lat_sim_out_path);
-	// The original sequence
+	// The original sequence (str)
 	checkpoint.at("sequence").get_to(sequence);
 
 	// Access data stored in json log of simulation being resumed.
@@ -734,6 +689,7 @@ int main(int argc, char** argv)
 	}
 	json_log.at("population size").get_to(population_size);
 	json_log.at("temperature").get_to(temperature);
+	json_log.at("single mutation mode").get_to(single_mutation_mode);
 	json_log.at("simulations per gen").get_to(simulations_per_gen);
 	json_log.at("reevaluation size").get_to(checkpoint_reevaluation_size);
 	json_log.at("degradation timescale").get_to(degradation_param);
@@ -744,7 +700,8 @@ int main(int argc, char** argv)
 	std::string foldevo_share_path;
 	std::string current_foldevo_share_path(getenv("FOLDEVO_SHARE"));
 	json_log.at("foldevo share path").get_to(foldevo_share_path);
-	json_log.at("translation params").get_to(speedparams_path);
+	json_log.at("elongation interval").get_to(elongation_interval);
+	json_log.at("slow elongation interval").get_to(slow_elongation_interval);
 	json_log.at("instant ribosome release").get_to(
 	    instant_ribosome_release);
 	json_log.at("mutation mode").get_to(mutation_mode);
@@ -796,33 +753,14 @@ int main(int argc, char** argv)
 	}
 
 	// need to trim json log if it's too long
-	// also, we will reconstruct recorded_fitnesses
 	int checkpoint_generation;
 	checkpoint.at("generation").get_to(checkpoint_generation);
 	auto it = json_log.at("trajectory").begin();
-	std::string curr_seq = it->at("aa sequence");
-	std::string new_seq;
 	while (it != json_log.at("trajectory").end() &&
 	       it->at("generation") <= checkpoint_generation)
 	{
-	    new_seq = it->at("aa sequence");
-	    if (it->at("accepted"))
-	    {
-		recorded_fitnesses[curr_seq] = it->at("old fitness");
-		curr_seq = new_seq;
-	    }
-	    else
-	    {
-		recorded_fitnesses[new_seq] = it->at("new fitness");
-	    }
 	    ++it;
 	}
-
-	// auto it2 = it;
-	// for (; it2 != json_log.at("trajectory").end(); ++it2)
-	// {
-	//     recorded_fitnesses.erase(it2->at("aa sequence"));
-	// }
 
 	json_log.at("trajectory").erase(it, json_log.at("trajectory").end());
 
@@ -832,28 +770,19 @@ int main(int argc, char** argv)
     // --------------------------------------------------
     // Begin simulation setup
 
-    // Process the user-provided sequence
-    std::vector<int> nuc_sequence;
-    std::vector<int> old_nuc_sequence;
-    std::vector<AminoAcid> aa_sequence;
-    std::vector<AminoAcid> old_aa_sequence;
-    std::vector<Codon> codon_sequence;
-
     // Infer lengths from folded conformation length
     unsigned int protein_length = folded_conformation.length() + 1;
-    unsigned int nuc_length = protein_length * 3;
+
+    // Process the user-provided sequence
+    std::vector<AminoAcid> aa_sequence;
+    std::vector<int> slow_codon_sequence(protein_length, 0);
+    std::vector<int> old_slow_codon_sequence(protein_length, 0);
 
     // Resize vectors
-    nuc_sequence.resize(nuc_length);
-    old_nuc_sequence.resize(nuc_length);
     aa_sequence.resize(protein_length);
-    old_aa_sequence.resize(protein_length); // for recorded_fitnesses
-    codon_sequence.resize(protein_length);
 
     if (!resume_from_checkpoint)
     {
-	// We use resize because we directly access the underlying arrays of
-	// our three vectors in this next section (b/c interfacing with C code)
 	if (protein_length == sequence.length()) 
 	{
 	    // Presume it's a protein sequence
@@ -862,32 +791,6 @@ int main(int argc, char** argv)
 	    {
 		std::ostringstream err;
 		err << "Letter to aa conversion problem" << std::endl;
-		err << "Sequence: " << sequence << std::endl;
-		print_error(err.str(), debug_mode);
-		exit(DATA_ERROR);
-	    }
-	    AASeqToNucSeq(aa_sequence.data(), nuc_sequence.data(),
-			  protein_length, random_codons);
-	}
-	else if (protein_length * 3 == sequence.length())
-	{
-	    // presume we have an rna sequence
-	    if (LetterToNucCodeSeq(
-		    sequence.c_str(), nuc_sequence.data(), nuc_length))
-	    {
-		std::ostringstream err;
-		err << "letter to nuc conversion problem" << std::endl;
-		err << "Sequence: " << sequence << std::endl;
-		print_error(err.str(), debug_mode);
-		exit(DATA_ERROR);
-	    }
-	    if (NucSeqToAASeq(
-		    nuc_sequence.data(), nuc_length, aa_sequence.data()))
-	    {
-		// nuc sequence contains a stop codon
-		std::ostringstream err;
-		err << "Provided RNA sequence contains a stop codon"
-		    << std::endl;
 		err << "Sequence: " << sequence << std::endl;
 		print_error(err.str(), debug_mode);
 		exit(DATA_ERROR);
@@ -901,35 +804,19 @@ int main(int argc, char** argv)
 		<< ", inferred from conformation string," << std::endl
 		<< "is not matched by provided sequence:" << std::endl
 		<< sequence << ", l = " << sequence.length() << std::endl
-		<< "Expected length of " << protein_length << " or "
-		<< nuc_length << " (RNA sequence)" << std::endl;
+		<< "Expected length of " << protein_length << std::endl;
 	    print_error(err.str(), debug_mode);
 	    exit(DATA_ERROR);
 	}
     }
     else			// resuming from checkpoint
     {
-	nuc_sequence.clear();
-	old_nuc_sequence.clear();
-	checkpoint.at("nuc sequence").get_to(nuc_sequence);
-	checkpoint.at("old nuc sequence").get_to(old_nuc_sequence);
-	NucSeqToAASeq(nuc_sequence.data(), nuc_length, aa_sequence.data());
-    }
-
-    // Obtain a codon sequence from nuc_sequence
-    NucSeqToCodonSeq(nuc_sequence.data(), nuc_length, codon_sequence.data());
-
-    // Open translation speed data file and read
-    // Make vector of 821, since highest codon is 0x333 = 820
-    std::vector<unsigned int> translation_times(821, 0);
-    std::vector<int> stop_codon_times;
-    ReadTranslationTimes(speedparams_path.c_str(), translation_times.data());
-
-    // Here, we find the three translation times that correspond to
-    // the stop codons.
-    for (auto& it : STOP_CODONS)
-    {
-	stop_codon_times.push_back(translation_times.at(it));
+	aa_sequence.clear();
+	slow_codon_sequence.clear();
+	old_slow_codon_sequence.clear();
+	checkpoint.at("aa sequence").get_to(aa_sequence);
+	checkpoint.at("slow codon sequence").get_to(slow_codon_sequence);
+	checkpoint.at("old slow codon sequence").get_to(old_slow_codon_sequence);
     }
 
     // It's time to give the people some information
@@ -940,6 +827,7 @@ int main(int argc, char** argv)
 	    json_log["sequence"] = sequence;
 	    json_log["folded conformation"] = folded_conformation;
 	    json_log["generations"] = n_gens;
+	    json_log["single mutation mode"] = single_mutation_mode;
 	    json_log["population size"] = population_size;
 	    json_log["temperature"] = temperature;
 	    json_log["simulations per gen"] = g_world_size;
@@ -948,7 +836,8 @@ int main(int argc, char** argv)
 	    json_log["fitness constant"] = fitness_constant;
 	    json_log["latpack share path"] = getenv("LATPACK_SHARE");
 	    json_log["foldevo share path"] = getenv("FOLDEVO_SHARE");
-	    json_log["translation params"] = speedparams_path;
+	    json_log["elongation interval"] = elongation_interval;
+	    json_log["slow elongation interval"] = slow_elongation_interval;
 	    json_log["instant ribosome release"] = instant_ribosome_release;
 	    json_log["rng seed"] = rng_seed;
 	    json_log["mutation mode"] = mutation_mode;
@@ -956,7 +845,7 @@ int main(int argc, char** argv)
 	}
 	// printing
 	*outstream
-	    << "# folding_evolution" << std::endl
+	    << "# folding_evolution -- d0.0.15-draft1" << std::endl
 	    << "# input seq : " << sequence << std::endl
 	    << "# n_gens : " << n_gens << std::endl
 	    << "# pop size : " << population_size << std::endl
@@ -966,10 +855,10 @@ int main(int argc, char** argv)
 	    << "# degradation timescale : " << degradation_param << std::endl
 	    << "# fitness constant : " << fitness_constant << std::endl
 	    << "# rng seed : " << rng_seed << std::endl
-	    << "# translation params : " << speedparams_path << std::endl
+	    << "# elongation interval : " << elongation_interval << std::endl
 	    << "# latpack share : " << getenv("LATPACK_SHARE") << std::endl
 	    ;
-	print_header(outstream, aa_sequence, nuc_sequence); 
+	print_header(outstream, aa_sequence); 
     }
     
     // Simulation-related variables and parameters
@@ -1005,7 +894,7 @@ int main(int argc, char** argv)
     std::vector<std::string> latfoldvec_command;
     std::vector<std::string> old_latfoldvec_command;
     std::unique_ptr<char []> aa_sequence_str(new char[protein_length+1]); // the current trial sequence
-    std::unique_ptr<char []> old_aa_sequence_str(new char[protein_length+1]); // the current accepted
+    bool end_simulation = false; // for single_mutation_mode
 
     if (resume_from_checkpoint)
     {
@@ -1030,14 +919,10 @@ int main(int argc, char** argv)
     for (; gen <= n_gens; ++gen)
     {
 	// Compose the simulation parameters.
-	int final_time = stop_codon_times[0];
-	if (instant_ribosome_release)
-	{
-	    final_time = 0;
-	}
+	int final_time = instant_ribosome_release ? 0 : elongation_interval;
 	translation_schedule = make_translation_schedule(
-	    translation_times, codon_sequence, final_time,
-	    &total_translation_steps);
+	    elongation_interval, slow_elongation_interval, slow_codon_sequence,
+	    final_time, &total_translation_steps);
 	PrintAASequence(
 	    aa_sequence_str.get(), aa_sequence.data(), protein_length);
 	latfoldvec_command = compose_latfoldvec_command(
@@ -1069,11 +954,6 @@ int main(int argc, char** argv)
 		hdf5_output_file.str(), &native_energy,
 		degradation_param, protein_length, old_total_translation_steps,
 		&old_pnat_average, &old_pnat_weight, old_folding_times);
-
-	    // // Now update old fitness
-	    // old_protein_output = reaverage_protein_output(
-	    // 	old_protein_output, protein_output, g_subcomm_size,
-	    // 	g_world_size, n_gens_without_accept);
 	    old_fitness = calculate_fitness(
 		old_protein_output, fitness_constant);
 	}
@@ -1158,10 +1038,10 @@ int main(int argc, char** argv)
 		accept = false;
 
 	    // Output information
-	    print_state(outstream, gen, aa_sequence, nuc_sequence, old_fitness,
+	    print_state(outstream, gen, aa_sequence, slow_codon_sequence, old_fitness,
 			fitness, native_energy, accept);
 	    save_state(json_log, gen, n_gens_without_accept, mutation_type,
-		       aa_sequence, nuc_sequence, old_fitness, fitness,
+		       aa_sequence, slow_codon_sequence, old_fitness, fitness,
 		       old_protein_output, protein_output, old_pnat_average,
 		       pnat_average, native_energy, (bool)accept);
 	    if (gen % DEFAULT_JSON_OUTFREQ == 0)
@@ -1176,15 +1056,12 @@ int main(int argc, char** argv)
 	// Update / revert
 	if (accept)
 	{
-	    if (gen > 0)
+	    if (single_mutation_mode && gen > 0)
 	    {
-		NucSeqToAASeq(old_nuc_sequence.data(), nuc_length, old_aa_sequence.data());
-		PrintAASequence(
-		    old_aa_sequence_str.get(), old_aa_sequence.data(), protein_length);
-		recorded_fitnesses[old_aa_sequence_str.get()] = old_fitness;
+		end_simulation = true;
 	    }
 	    // Update old values to take on current sequence
-	    old_nuc_sequence = nuc_sequence;
+	    old_slow_codon_sequence = slow_codon_sequence;
 	    old_latfoldvec_command = latfoldvec_command;
 	    old_total_translation_steps = total_translation_steps;
 	    old_protein_output = protein_output;
@@ -1198,8 +1075,7 @@ int main(int argc, char** argv)
 	else
 	{
 	    // Revert, saving the fitness value
-	    recorded_fitnesses[aa_sequence_str.get()] = fitness;
-	    nuc_sequence = old_nuc_sequence;
+	    slow_codon_sequence = old_slow_codon_sequence;
 	    n_gens_without_accept++;
 	}
 
@@ -1207,50 +1083,15 @@ int main(int argc, char** argv)
 	// independent rng streams for different nodes.
 	if (!g_world_rank)
 	{
-	    // We check if mutant sequence has been encountered before.
-	    std::vector<int> new_nuc_sequence;
-	    std::vector<AminoAcid> new_aa_sequence;
-	    new_aa_sequence.resize(protein_length);
-	    int infinite_loop_checker = 0;
-	    while (true)
-	    {
-		new_nuc_sequence = mutate_sequence(nuc_sequence, mutation_mode);
-		NucSeqToAASeq(new_nuc_sequence.data(), nuc_length, new_aa_sequence.data());
-		PrintAASequence(
-		    aa_sequence_str.get(), new_aa_sequence.data(), protein_length);
-		auto result = recorded_fitnesses.find(aa_sequence_str.get());
-		if (result == recorded_fitnesses.end())
-		{
-		    break;
-		}
-		else
-		{
-		    if (result->second >= old_fitness)
-		    {
-			break;
-		    }
-		}
-
-		++infinite_loop_checker;
-		if (infinite_loop_checker > 10000)
-		{
-		    std::cerr << "# No new sequences / s>=0 sequences in 10000 mutation attempts. "
-			      << "Fitness maxima? Continuing with current mutant.\n";
-		    break;
-		}
-	    }
-	    nuc_sequence = new_nuc_sequence;
+	    int to_mutate = (int)(threefryrand() * protein_length);
+	    slow_codon_sequence[to_mutate] = !(bool)slow_codon_sequence[to_mutate];
 	}
 
-	MPI_Bcast(nuc_sequence.data(), nuc_sequence.size(), MPI_INT,
+	MPI_Bcast(slow_codon_sequence.data(), slow_codon_sequence.size(), MPI_INT,
 		  0, MPI_COMM_WORLD);
 	
-	// and update sequences
-	NucSeqToCodonSeq(nuc_sequence.data(), nuc_length, codon_sequence.data());
-	NucSeqToAASeq(nuc_sequence.data(), nuc_length, aa_sequence.data());
-
 	// Need to save checkpoint
-	if (gen % checkpoint_frequency == 0 || gen == n_gens)
+	if (gen % checkpoint_frequency == 0 || gen == n_gens || end_simulation)
 	{
 	    std::ostringstream checkpoint_path;
 	    checkpoint_path << out_path << "/checkpoint"<< std::setw(5)
@@ -1258,8 +1099,9 @@ int main(int argc, char** argv)
 			   << ".json";
 
 	    checkpoint["generation"] = gen;
-	    checkpoint["nuc sequence"] = nuc_sequence;
-	    checkpoint["old nuc sequence"] = old_nuc_sequence;
+	    checkpoint["aa sequence"] = aa_sequence;
+	    checkpoint["slow codon sequence"] = slow_codon_sequence;
+	    checkpoint["old slow codon sequence"] = old_slow_codon_sequence;
 	    checkpoint["old total translation steps"] =
 		old_total_translation_steps;
 	    checkpoint["last accepted gen"] = last_accepted_gen;
@@ -1271,9 +1113,11 @@ int main(int argc, char** argv)
 	    checkpoint["old pnat average"] = old_pnat_average;
 	    checkpoint["old pnat weight"] = old_pnat_weight;
 	    checkpoint["old folding times"] = old_folding_times;
-	    checkpoint["recorded fitnesses"] = recorded_fitnesses;
 	    write_checkpoint(checkpoint_path.str(), checkpoint);
 	}
+
+	if (end_simulation)
+	    break;
     }
 
     // finalize json log
@@ -1529,9 +1373,10 @@ std::vector<char *> string_vec_to_cstring_vec(
 // Given a codon sequence and a dictionary linking codons and
 // translation times, make a string of space-separated translation times.
 std::string make_translation_schedule(
-    const std::vector<unsigned int> & times,
-    const std::vector<Codon> & codon_sequence,
-    const int final_time,
+    int elongation_interval,
+    int slow_elongation_interval,
+    std::vector<int> slow_codon_sequence,
+    int final_time,
     int* total_translation_steps)
 {
     std::ostringstream os;
@@ -1540,12 +1385,21 @@ std::string make_translation_schedule(
 
     // Note that we skip the first five codons (start at the
     //   6th--index 5), since those residues are present at the start
-    //   of the MC simulation.
-    for (auto codon = codon_sequence.begin() + 5;
-	 codon != codon_sequence.end(); ++codon)
+    //   of the MC simulation. i.e. protein starts 5 residues long,
+    //   6th residue bing translated
+    for (auto codon = slow_codon_sequence.begin() + 5;
+	 codon != slow_codon_sequence.end(); ++codon)
     {
-	os << times.at(*codon) << " ";
-	*total_translation_steps += times.at(*codon) * protein_length;
+	if (*codon)
+	{
+	    os << slow_elongation_interval << " ";
+	    *total_translation_steps += slow_elongation_interval * protein_length;
+	}
+	else
+	{
+	    os << elongation_interval << " ";
+	    *total_translation_steps += elongation_interval * protein_length;
+	}
 	++protein_length;
     }
     os << final_time;
@@ -1670,77 +1524,6 @@ void run_latfoldvec(
     close(bak);
     return;
 }
-
-
-// Build a vector of strings that are arguments to invoke
-// latMapTraj. Note arguments -traj is not added here.
-// std::vector<std::string> compose_latmaptraj_command(
-//     const std::string& latpack_path,
-//     const std::string& folded_conformation)
-// {
-//     std::vector<std::string> command;
-//     command.push_back(latpack_path + "bin/latMapTraj");
-//     command.push_back("-ref=" + folded_conformation);
-//     command.push_back("-lat=CUB");
-//     command.push_back("-hdf5");
-//     return command;
-// }
-
-
-// FIXME (update to full MPI)
-// Use fork and exec to run n_simulations of latMapTraj to analyze the
-// latFoldVec simulations that were run.
-// this has not been updated yet (because function is not used)
-// void run_latmaptraj(
-//     std::vector<std::string> & latmaptraj_command,
-//     const std::string& h5file_base,
-//     int n_simulations)
-// {
-//     for (int i=g_world_rank*n_simulations; i<(g_world_rank+1)*n_simulations; ++i)
-//     {
-// 	pid_t pid = fork();
-// 	if (pid == -1)
-// 	{
-// 	    std::cerr << "Failed to fork" << std::endl;
-// 	    exit(IO_ERROR);
-// 	}
-// 	else if (pid == 0)
-// 	{
-// 	    // child
-// 	    // we land here for each instance
-// 	    // Add additional parameters
-// 	    latmaptraj_command.push_back("-traj=" + h5file_base +
-// 					 std::to_string(i) + ".h5");
-// 	    std::vector<char *> cstring_command_vec = string_vec_to_cstring_vec(
-// 		latmaptraj_command);
-
-// 	    // suppress std out
-// 	    int fd = open("/dev/null", O_WRONLY);
-// 	    dup2(fd, 1);
-
-// 	    execv(cstring_command_vec[0], cstring_command_vec.data());
-// 	}
-//     }
-
-//     // wait for processes to finish
-//     while (true)
-//     {
-// 	int status;
-// 	pid_t done = wait(&status);
-// 	if (done == -1)
-// 	{
-// 	    if (errno == ECHILD) break; // no more child processes
-// 	}
-// 	else
-// 	{
-// 	    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-// 	    {
-// 		std::cerr << "pid " << done << " failed" << std::endl;
-// 		exit(LATPACK_ERROR);
-// 	    }
-// 	}
-//     }    
-// }
 
 
 // Analyze latFoldVec simulations to average protein output.
@@ -1965,8 +1748,7 @@ std::vector<int> mutate_sequence(
 // Print the header for state output
 void print_header(
     std::ostream * outstream,
-    const std::vector<AminoAcid> & aa_sequence,
-    const std::vector<int> & nuc_sequence)
+    const std::vector<AminoAcid> & aa_sequence)
 {
     auto shorten = [outstream](std::string str, int len)
     {
@@ -1977,7 +1759,7 @@ void print_header(
     *outstream << std::endl;
     *outstream << std::left <<	"# Gen|";
     *outstream << shorten("AA sequence", aa_sequence.size()) << "|";
-    *outstream << shorten("Nuc sequence", nuc_sequence.size()) << "|";
+    *outstream << shorten("Slow codons", aa_sequence.size()) << "|";
     *outstream << 
 	std::setw(8) << "Old fit." << "|" <<
 	std::setw(8) << "New fit." << "|" <<
@@ -1987,7 +1769,7 @@ void print_header(
 
     int line_length = 4;
     line_length += aa_sequence.size() + 1;
-    line_length += nuc_sequence.size() + 1;
+    line_length += aa_sequence.size() + 1;
     line_length += 23 + 3;
     line_length += 6;
 
@@ -2004,23 +1786,29 @@ void print_state(
     std::ostream * outstream,
     int generation,
     std::vector<AminoAcid> & aa_sequence,
-    std::vector<int> & nuc_sequence,
+    std::vector<int> & slow_codon_sequence,
     double old_fitness,
     double new_fitness,
     double native_energy,
     bool accept)
 {
     auto aa_seq_len = aa_sequence.size();
-    auto nuc_seq_len = nuc_sequence.size();
     std::unique_ptr<char []> aa_seq_str(new char[aa_seq_len+1]);
-    std::unique_ptr<char []> nuc_seq_str(new char[nuc_seq_len+1]);
     PrintAASequence(aa_seq_str.get(), aa_sequence.data(), aa_seq_len);
-    PrintNucCodeSequence(nuc_seq_str.get(), nuc_sequence.data(), nuc_seq_len);
+
+    std::ostringstream os;
+    for (auto &codon : slow_codon_sequence)
+    {
+	if (codon)
+	    os << 1;
+	else
+	    os << 0;
+    }
 
     *outstream << std::right
 	       << std::setw(5) << generation << " "
 	       << std::setw(aa_seq_len) << aa_seq_str.get() << " "
-	       << std::setw(nuc_seq_len) << nuc_seq_str.get() << " "
+	       << std::setw(aa_seq_len) << os.str() << " "
 	       << std::setprecision(5)
 	       << std::setw(8) << old_fitness << " "
 	       << std::setw(8) << new_fitness << " "
@@ -2040,7 +1828,7 @@ void save_state(
     int n_gens_without_accept,
     int mutation_type,
     std::vector<AminoAcid> & aa_sequence,
-    std::vector<int> & nuc_sequence,
+    std::vector<int> & slow_codon_sequence,
     double old_fitness,
     double new_fitness,
     double old_protein_output,
@@ -2051,12 +1839,18 @@ void save_state(
     bool accept)
 {
     auto aa_seq_len = aa_sequence.size();
-    auto nuc_seq_len = nuc_sequence.size();
     std::unique_ptr<char []> aa_seq_str(new char[aa_seq_len+1]);
-    std::unique_ptr<char []> nuc_seq_str(new char[nuc_seq_len+1]);
     PrintAASequence(aa_seq_str.get(), aa_sequence.data(), aa_seq_len);
-    PrintNucCodeSequence(nuc_seq_str.get(), nuc_sequence.data(), nuc_seq_len);
-    
+
+    std::ostringstream os;
+    for (auto &codon : slow_codon_sequence)
+    {
+	if (codon)
+	    os << 1;
+	else
+	    os << 0;
+    }
+
     int n_evaluations =
 	n_gens_without_accept * (int)json_log["reevaluation size"]
 	+ (int)json_log["simulations per gen"];
@@ -2070,7 +1864,7 @@ void save_state(
     entry["old evaluations"] = n_evaluations;
     entry["mutation type"] = mutation_type;
     entry["aa sequence"] = aa_seq_str.get();
-    entry["nuc sequence"] = nuc_seq_str.get();
+    entry["slow codon sequence"] = os.str();
     entry["old fitness"] = old_fitness;
     entry["new fitness"] = new_fitness;
     entry["old protein output"] = old_protein_output;
