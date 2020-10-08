@@ -5,20 +5,24 @@ cotranslational folding.
 The main program, `folding_evolution`, is located at
 `src/app_folding_evolution/folding_evolution.cpp`. It is code for an
 MPI program. Supporting libraries are in `src`, although some are not
-used, and some code within `src` are from other projects.
+used, and some code within `src` are from other projects. Some other
+evolutionary simulation code written by others for other research
+projects are in `src`.
 
 To compile, an installation of HDF5 and MPI are needed. Furthermore,
 the software suite latPack, https://github.com/proteins247/latPack,
-must be installed.
+must be installed. `install_folding_evolution.sh` is how I compile and
+install my `folding_evolution` executable as a module on the Harvard
+cluster; it should either be modified before use elsewhere.
 
 # Repository branches
-The default branch, `master`, has not been updated in some
-time. Several variants of the code are located in different branches:
+Several variants of the code are located in different branches:
 
-- `new_fitness_eval`: Evolution of lattice protein sequences under a
-  fitness function that evaluates cotranslational folding simulations.
-- `no_translation`: Same as above, but protein folding simulations are
-  based on *in vitro* folding performance.
+- `new_fitness_eval`: Same as master branch. Evolution of lattice
+  protein sequences under a fitness function that evaluates
+  cotranslational folding simulations.
+- `no_translation`: Protein folding simulations for fitness evaluation
+  are based on *in vitro* folding performance.
 - `stability_only`: Fitness evaluation in which protein starts in
   folded state.
 - `translation_rate`: Simulation mode where mutations are synonymous
