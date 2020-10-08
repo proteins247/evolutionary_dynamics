@@ -23,7 +23,7 @@ fi
 
 if [ -f /usr/local/bin/centos7-modules.sh ]; then
     source centos7-modules.sh
-    module add gcc/7.1.0-fasrc01 openmpi/2.1.0-fasrc02 hdf5/1.10.1-fasrc01
+    module add gcc/7.1.0-fasrc01 openmpi/2.1.0-fasrc02 hdf5/1.10.1-fasrc02
 else
     echo "Run this on CentOS 7."
     echo "exiting"
@@ -60,7 +60,12 @@ echo "Compiling folding_evolution..."
 mpic++ -Wall -O3 -std=c++11 folding_evolution.cpp -o folding_evolution -lhdf5 \
        ../rng.o ../gencode.o
 if [ $? -ne 0 ]; then
-    echo "Compile FoldEvo failed"
+    echo "Compile folding_evolution.cpp failed"
+    exit -1
+fi
+gcc -Wall -O3 translation_schedule.c ../gencode.o ../rng.o -o translation_schedule
+if [ $? -ne 0 ]; then
+    echo "Compile translation_schedule.c failed"
     exit -1
 fi
 echo "Compiling generateStableGene..."
@@ -76,6 +81,8 @@ echo
 echo "Installing..."
 cd $FOLDEVODIR
 cp -f folding_evolution "${BINDIR}"
+cp -f translation_schedule "${BINDIR}"
+cp -f design_sequence.py "${BINDIR}"
 cd $GENEDIR
 cp -f generateStableGene "${BINDIR}"
 /bin/cp -rf ../../share/* "${SHAREDIR}"

@@ -1,6 +1,69 @@
 
 [comment]: # -*- mode: markdown -*-
 # Changelog for folding_evolution
+## [0.0.13] - 2019-06
+### Added
+- Several flat translation time parameter files
+### Changed
+- Default temperature 0.2
+- generate_translation_params.py supports flat schedules (same param
+  for every codon)
+
+## [0.0.12] - 2019-05-30
+### Added
+- Simplified translation time parameters available: times_simple_scale100x.dat
+- design_sequence.py sequence ddesign script using z-score
+- translation_schedule utility program to print a translation schedule.
+- Simplified translation time parameters with 10x scaling: times_simple_scale10x.dat
+### Changed
+- Check for failure when opening hdf5 files.
+### Fixed
+- The fastest codons were wrong for 5 amino acids in gencode.c.
+
+## [0.0.11] - 2019-03-26
+### Changed
+- Fitness function based on protein output extrapolation.
+- Requires latPack/1.9.1-15 or greater (but not enforced)
+- Fitness function is purely linear (no x / x0 + x transformation)
+- Minimum fitness value is 1e-7
+- Posttranslation simulation time is 0.75e6
+- `DEFAULT_REEVALUATION_RATIO` changed to 0.25
+
+## [0.0.10] - 2019-03-17
+### Added
+- `folding_evolution` will check during checkpoint resume that the same
+  latPack version is being used via `LATPACK_SHARE` environment variable.
+### Changed
+- Use latFoldVec executable and LATPACK_SHARE environment variable of
+  calling environment (instead of absolute paths).
+- Switch back to always saving conformations in latFoldVec.
+- Minimum fitness is now 1e-4 (0.0001) instead of 1e-3.
+
+## [0.0.9] - 2019-03-08
+### Changed
+- New fitness function based on "output" of protein
+- `folded_fraction` -> `protein_output`
+- Use (requires) latpack/1.9.1-13
+### Fixed
+- Wrong 'old evaluations' logged for generation 0. It should be 0.
+
+## [0.0.8] - 2019-02-19
+### Changed
+- Constant posttranslation time regardless of degradation param.
+- Use latPack version 1.9.1-12
+- --new-ngens to set new target generations on checkpoint resume.
+
+## [0.0.7] - 2019-02-18
+### Changed
+- Further revisions of fitness function:
+- 0.0.7-1: Exponential w.r.t. Pnat; binary degradation
+- 0.0.7-2: Exponential w.r.t. Pnat; continuous degradation
+- 0.0.7-3: Linear w.r.t. Pnat; continuous degradation 
+
+## [0.0.6] - 2019-02-17
+### Changed
+- Fitness function revised to include P_nat
+- Use latPack version 1.9.1-11
 
 ## [0.0.5] - 2019-01-17
 ### Added

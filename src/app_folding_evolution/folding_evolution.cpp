@@ -1,8 +1,7 @@
 /* 
- * folding_evolution v0.0.5
+ * folding_evolution v0.0.14
  *
- * v0.0.5 adds a instant ribosome release option.
- * 
+ * v0.0.14
  *
  */
 
@@ -18,9 +17,11 @@
 #include <cstdio>
 #include <cmath>
 #include <map>
+#include <limits>
 
 #include <getopt.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -74,16 +75,18 @@ static const std::string helptext =
     "                            as a latPack-style move sequence.\n"
     "  -s, --speed-params=FILE   REQUIRED. Path to file with translation\n"
     "                            times of the codons.\n"
-    "  -c, --save-conformations  Save latFoldVec simulation conformations.\n"
+    "  -a, --activity-constant   Set constant in fitness function.\n"
+    "                            Default=0.25\n"
     "  -d, --debug               Allow error messages from all processors.\n"
     "  -f, --from-checkpoint     Resume simulation from checkpoint file.\n"
-    "  -k, --degradation-param=K Value setting timescale for unfolded protein\n"
-    "                            degradation (penalizes slow folding).\n"
-    "  -l, --latpack-path=PATH   Latpack binaries here. Default=\n"
-    "                            /n/home00/vzhao/pkg/latPack/1.9.1-8/\n"
+    "  -k, --degradation-param=K Value setting timescale for protein\n"
+    "                            degradation (penalizes slow folding and\n"
+    "                            low stability).\n"
     "  -m, --mutation-mode=M     One of 0, 1, or 2, indicating restriction to\n"
     "                            synonymous mutation, nonsynonymous mutation,\n"
     "                            or allow both kinds of mutations (default).\n"
+    "      --new-ngens=N         When resuming from checkpoint, change the\n"
+    "                            target number of generations."    
     "  -o, --out-path=FILE       Output will be put in this directory.\n"
     "                            Default=./out\n"
     "  -p, --population-size=N   Size of population for evolutionary\n"
@@ -93,10 +96,10 @@ static const std::string helptext =
     "                            (Default behavior is to use fastest codons.)\n"
     "  -r, --seed=N              RNG seed. Default=1\n"
     "  -t, --temperature=T       Temperature of latFoldVec simulations.\n"
-    "                            Default=0.3\n"
+    "                            Default=0.2\n"
     "  -z, --instant-release     Release from ribosome immediately after\n"
     "                            translation.\n"
-    "      --help   Display this help and exit.\n"
+    "      --help                Display this help and exit.\n"
     "\n"
     "Format of the output files:\n"
     "\nThe primary output is a simulation log that records the generation\n"
@@ -104,6 +107,13 @@ static const std::string helptext =
     "the mutation was accepted. Trajectory files are also saved.\n"
     "\n"
     ;
+
+enum MutationMode
+{
+    SynonymousOnly,
+    NonsynonymousOnly,
+    MutateAll
+};
 
 // error values
 static const int PARSE_ERROR = 1;
@@ -113,19 +123,20 @@ static const int LATPACK_ERROR = 4;
 
 // default values
 static const int GENS_MAX = 99999;
-static const std::string DEFAULT_LATPACK_PATH =
-    "/n/home00/vzhao/pkg/latPack/1.9.1-10/";
 static const std::string DEFAULT_OUTPATH = "./out";
 static const uint64_t DEFAULT_SEED = 1;
-static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
 static const int DEFAULT_CHECKPOINT_FREQ = 10;
 static const int DEFAULT_JSON_OUTFREQ = 5;
 static const int DEFAULT_POPULATION_SIZE = 500;
-static const int DEFAULT_MUTATION_MODE = 2;    // MutateAll default value
-static const double DEFAULT_TEMPERATURE = 0.3;
-static const double DEFAULT_REEVALUATION_RATIO = 0.5; // Not commandline option.
-static const double DEFAULT_FITNESS_CONSTANT = 0.75;
+static const MutationMode DEFAULT_MUTATION_MODE = NonsynonymousOnly;
+static const double DEFAULT_TEMPERATURE = 0.2;
+// Not commandline options:
+static const int DEFAULT_LATFOLD_OUTFREQ = 5000;
+static const double DEFAULT_REEVALUATION_RATIO = 0.25;
+static const double DEFAULT_FITNESS_CONSTANT = 0.25;
 static const double DEFAULT_DEGRADATION_PARAM = 1000000;
+static const double DEFAULT_POSTTRANSLATION_TIME = 0.75e6; // This is no longer used
+static const double DEFAULT_CELL_TIME = 100e6;	   // Used to normalize fitness.
 
 static const std::vector<Codon> STOP_CODONS = {N_UAA, N_UAG, N_UGA};
 
@@ -197,14 +208,13 @@ std::string make_translation_schedule(
 // Build a vector of strings that are arguments to invoke
 // latFoldVec. Note arguments -seed and -outFile are not added here.
 std::vector<std::string> compose_latfoldvec_command(
-    const std::string& latpack_path,
     const std::string& aa_sequence,
     const std::string& folded_conformation,
     const std::string& translation_schedule,
-    const int& full_length_time,
-    const double& temperature,
-    const int& output_frequency,
-    bool save_conformations);
+    int full_length_time,
+    double temperature,
+    int output_frequency,
+    double degradation_scale);
 
 
 // Use vfork and exec to run a latFoldVec co-translational folding
@@ -218,24 +228,24 @@ void run_latfoldvec(
     const std::string & outfile);
 
 
-// Build a vector of strings that are arguments to invoke
-// latMapTraj. Note arguments -traj is not added here.
-std::vector<std::string> compose_latmaptraj_command(
-    const std::string& latpack_path,
-    const std::string& folded_conformation);
+// // Build a vector of strings that are arguments to invoke
+// // latMapTraj. Note arguments -traj is not added here.
+// std::vector<std::string> compose_latmaptraj_command(
+//     const std::string& latpack_path,
+//     const std::string& folded_conformation);
 
 
-// FIXME (this function is not currently used)
-// Use fork and exec to run n_simulations of latMapTraj to analyze the
-// latFoldVec simulations that were run.
-void run_latmaptraj(
-    std::vector<std::string> & latmaptraj_command,
-    const std::string& h5file_base,
-    int n_simulations=1);
+// // (this function is not currently used)
+// // Use fork and exec to run n_simulations of latMapTraj to analyze the
+// // latFoldVec simulations that were run.
+// void run_latmaptraj(
+//     std::vector<std::string> & latmaptraj_command,
+//     const std::string& h5file_base,
+//     int n_simulations=1);
 
 
-// Analyze latFoldVec simulations to count number of successful
-// simulations. This is a parallel function.
+// Analyze latFoldVec simulations to average protein output.
+// This is a parallel function.
 //
 // @param filename The partial name of the file hdf5 output was
 //        written to.
@@ -243,38 +253,49 @@ void run_latmaptraj(
 // @param degradation_param Timescale that unfolded protein degradation
 //        acts on.
 // @param native_energy Value is updated with native energy.
-double evaluate_folded_fraction(
+double get_protein_output_avg(
     const std::string& filename,
-    int total_translation_steps,
+    double* native_energy,
     double degradation_param,
-    double* native_energy);
+    double protein_length,
+    double total_translation_steps,
+    double* old_pnat_average,
+    double* old_pnat_weight,
+    std::vector<double> &folding_times,
+    double t_cell=DEFAULT_CELL_TIME);
 
 
-// Calculate fitness from folded fraction.
+// Calculate fitness from protein output.
 //
-// @param folded_fraction The fraction of successful folding
+// @param protein_output The fraction of successful folding
 //        simulations
 // @param f_0 Fitness function parameter
 double calculate_fitness(
-    double folded_fraction,
+    double protein_output,
     double f_0=DEFAULT_FITNESS_CONSTANT);
 
 
-// Update folded fraction to incorporate new folding simulations.
+// // Update protein output to incorporate new folding simulations.
+// //
+// // @param old_protein_output The previously estimated protein output.
+// // @param new_protein_output The newly estimated protein output.
+// // @param n_reevaluators The number of simulations run to estimate
+// //        the new fitness value.
+// // @param n_total The total number of CPUs running simulations.
+// // @param n_gens_without_accept Number of generations since last
+// //        accepted mutation.
+// double reaverage_protein_output(
+//     double old_protein_output,
+//     double new_protein_output,
+//     int n_reevaluators,
+//     int n_total,
+//     int n_gens_without_accept);
+
+
 //
-// @param old_folded_fraction The previously estimated folded fraction.
-// @param new_folded_fraction The newly estimated folded fraction.
-// @param n_reevaluators The number of simulations run to estimate
-//        the new fitness value.
-// @param n_total The total number of CPUs running simulations.
-// @param n_gens_without_accept Number of generations since last
-//        accepted mutation.
-double reaverage_folded_fraction(
-    double old_folded_fraction,
-    double new_folded_fraction,
-    int n_reevaluators,
-    int n_total,
-    int n_gens_without_accept);
+std::vector<int> mutate_sequence(
+    const std::vector<int> & input_sequence,
+    MutationMode mutation_mode);
 
 
 // Print the header for simulation text log.
@@ -306,8 +327,10 @@ void save_state(
     std::vector<int> & nuc_sequence,
     double old_fitness,
     double new_fitness,
-    double old_folded_fraction,
-    double new_folded_fraction,
+    double old_protein_output,
+    double new_protein_output,
+    double old_pnat,
+    double new_pnat,
     double native_energy,
     bool accept);
 
@@ -332,8 +355,7 @@ int main(int argc, char** argv)
     // Split cpus into two groups
     // world_rank [0, reevaluation_size) does reevaluation
     int reevaluation_size = (int)g_world_size * DEFAULT_REEVALUATION_RATIO;
-    bool proc_does_reevaluation = (g_world_rank < reevaluation_size) ?
-	true : false;
+    bool proc_does_reevaluation = (g_world_rank < reevaluation_size);
     MPI_Comm_split(
 	MPI_COMM_WORLD, proc_does_reevaluation, g_world_rank, &g_subcomm);
     MPI_Comm_rank(g_subcomm, &g_subcomm_rank);
@@ -344,33 +366,28 @@ int main(int argc, char** argv)
 
     // Required:
     std::string sequence;
-    int n_gens;			// How many generations to run
+    int n_gens = 0;			// How many generations to run
 
     // Other params:
     bool debug_mode = false;
-    bool save_conformations = false;
     bool resume_from_checkpoint = false;
     bool instant_ribosome_release = false;
     int random_codons = 0;
     int population_size = DEFAULT_POPULATION_SIZE;
     std::string folded_conformation;
     std::string speedparams_path;
-    std::string latpack_path = DEFAULT_LATPACK_PATH;
     std::string out_path = DEFAULT_OUTPATH;
     std::string checkpoint_path;
     std::string lat_sim_out_path;
     std::string json_log_path;	// we're going to log using json
+    std::unordered_map<std::string, double> recorded_fitnesses;
     json checkpoint;
     json json_log;
     std::ostream * outstream = &std::cout;
     double degradation_param = DEFAULT_DEGRADATION_PARAM;
+    double fitness_constant = DEFAULT_FITNESS_CONSTANT;
     uint64_t rng_seed = DEFAULT_SEED;
-    enum MutationMode
-    {
-	SynonymousOnly,
-	NonsynonymousOnly,
-	MutateAll
-    } mutation_mode = static_cast<MutationMode>(DEFAULT_MUTATION_MODE);
+    MutationMode mutation_mode = DEFAULT_MUTATION_MODE;
     double temperature = DEFAULT_TEMPERATURE;
     // End variables to be determined by commandline options: 
 
@@ -393,25 +410,25 @@ int main(int argc, char** argv)
      * NULL and 0 otherwise.
      */
     static struct option long_options[] = {
+	{"activity-constant", required_argument, NULL, 'a'},
 	{"from-checkpoint", required_argument, NULL, 'f'},
 	{"degradation-param", required_argument, NULL, 'k'},
-	{"latpack-path", required_argument, NULL, 'l'},
 	{"mutation-mode", required_argument, NULL, 'm'},
 	{"native-fold", required_argument, NULL, 'n'},
+	{"new-ngens", required_argument, NULL, 2},
 	{"random-codons", no_argument, &random_codons, 1},
 	{"out-path", required_argument, NULL, 'o'},
 	{"population-size", required_argument, NULL, 'p'},
 	{"seed", required_argument, NULL, 'r'},
 	{"speed-params", required_argument, NULL, 's'},
 	{"temperature", required_argument, NULL, 't'},
-	{"save-conformations", no_argument, NULL, 'c'},
 	{"debug", no_argument, NULL, 'd'},
 	{"help", no_argument, NULL, 'h'},
 	{"instant-release", no_argument, NULL, 'z'},
 	{NULL, 0, NULL, 0}
     };
 
-    while ((c = getopt_long(argc, argv, "f:k:l:m:n:o:p:r:s:t:cdhz",
+    while ((c = getopt_long(argc, argv, "a:f:k:m:n:o:p:r:s:t:dhz",
 			    long_options, &option_index))
 	   != -1)
     {
@@ -421,12 +438,24 @@ int main(int argc, char** argv)
 	    print_help();
 	    exit(0);
 	case 'f':
-	    // We are resuming from checkpoint. Ignore all other arguments
+	    // We are resuming from checkpoint.
 	    checkpoint_path = optarg;
 	    resume_from_checkpoint = true;
-	    goto checkpoint_breakout;
-	case 'c':
-	    save_conformations = true;
+	    break;
+	case 'a':
+	    try
+	    {
+		fitness_constant = std::stod(optarg);
+	    }
+	    catch (...)
+	    {
+		std::ostringstream err;
+		err << "Failed to convert fitness constant: "
+		    << optarg << std::endl;
+		print_error(err.str(), debug_mode);
+		exit(PARSE_ERROR);
+	    }
+	    debug_mode = true;
 	    break;
 	case 'd':
 	    debug_mode = true;
@@ -447,22 +476,29 @@ int main(int argc, char** argv)
 		exit(PARSE_ERROR);
 	    }
 	    break;
-	case 'l':
-	    latpack_path = optarg;
-	    break;
 	case 'm':
 	    try
 	    {
 		switch (std::stoi(optarg))
 		{
 		case 0:
-		    mutation_mode = SynonymousOnly;
+		    // mutation_mode = SynonymousOnly;
+		    mutation_mode = NonsynonymousOnly;
+		    std::cerr << "Fitness saving means only mutation-mode 1 is supported"
+			      << std::endl;
+		    std::cerr << "Switching mutation mode to Nonsynonymousonly"
+			      << std::endl;
 		    break;
 		case 1:
 		    mutation_mode = NonsynonymousOnly;
 		    break;
 		case 2:
-		    mutation_mode = MutateAll;
+		    // mutation_mode = MutateAll;
+		    mutation_mode = NonsynonymousOnly;
+		    std::cerr << "Fitness saving means only mutation-mode 1 is supported"
+			      << std::endl;
+		    std::cerr << "Switching mutation mode to Nonsynonymousonly"
+			      << std::endl;
 		    break;
 		default:
 		    throw std::invalid_argument("Mutation mode not one of 0, 1, 2");
@@ -479,6 +515,20 @@ int main(int argc, char** argv)
 	    break;
 	case 'n':
 	    folded_conformation = optarg;
+	    break;
+	case 2:
+	    try
+	    {
+		n_gens = std::stoi(optarg);
+	    }
+	    catch (...)
+	    {
+		std::ostringstream err;
+		err << "Failed to convert --new-ngens: " << optarg
+		    << std::endl;
+		print_error(err.str(), debug_mode);
+		exit(PARSE_ERROR);
+	    }	    
 	    break;
         case 'o':
             out_path = optarg;
@@ -540,9 +590,6 @@ int main(int argc, char** argv)
 	    print_error(err.str(), debug_mode);
 	    exit(PARSE_ERROR);
 	}
-	continue;
-    checkpoint_breakout:
-	break;
     } // End while getopt_long
 
     // Continued parsing || checkpoint resume
@@ -647,8 +694,9 @@ int main(int argc, char** argv)
 	    }
 	}
 
-	// Wait for slow network file system
+	// Wait for everyone
 	MPI_Barrier(MPI_COMM_WORLD);
+	// Wait in case network file system is slow
 	while (!is_dir_exist(lat_sim_out_path))
 	{
 	    sleep(1);
@@ -676,17 +724,52 @@ int main(int argc, char** argv)
 	std::ifstream json_log_file(json_log_path);
 	json_log_file >> json_log;
 	json_log.at("folded conformation").get_to(folded_conformation);
-	json_log.at("generations").get_to(n_gens);
+	if (n_gens == 0)
+	{
+	    json_log.at("generations").get_to(n_gens);
+	}
+	else
+	{
+	    json_log["generations"] = n_gens;
+	}
 	json_log.at("population size").get_to(population_size);
 	json_log.at("temperature").get_to(temperature);
 	json_log.at("simulations per gen").get_to(simulations_per_gen);
 	json_log.at("reevaluation size").get_to(checkpoint_reevaluation_size);
 	json_log.at("degradation timescale").get_to(degradation_param);
-	json_log.at("latpack path").get_to(latpack_path);
+	json_log.at("fitness constant").get_to(fitness_constant);
+	std::string latpack_share_path;
+	std::string current_latpack_share_path(getenv("LATPACK_SHARE"));
+	json_log.at("latpack share path").get_to(latpack_share_path);
+	std::string foldevo_share_path;
+	std::string current_foldevo_share_path(getenv("FOLDEVO_SHARE"));
+	json_log.at("foldevo share path").get_to(foldevo_share_path);
 	json_log.at("translation params").get_to(speedparams_path);
 	json_log.at("instant ribosome release").get_to(
 	    instant_ribosome_release);
 	json_log.at("mutation mode").get_to(mutation_mode);
+
+	if (latpack_share_path != current_latpack_share_path)
+	{
+	    std::cerr << "Current LATPACK_SHARE and checkpoint LATPACK_SHARE "
+		      << "do not match.\n"
+		      << current_latpack_share_path << std::endl
+		      << " vs\n"
+		      << latpack_share_path << std::endl;
+	    std::cerr << "Use right latpack version.\n";
+	    exit(DATA_ERROR);
+	}
+
+	if (foldevo_share_path != current_foldevo_share_path)
+	{
+	    std::cerr << "Current FOLDEVO_SHARE and checkpoint FOLDEVO_SHARE "
+		      << "do not match.\n"
+		      << current_foldevo_share_path << std::endl
+		      << " vs\n"
+		      << foldevo_share_path << std::endl;
+	    std::cerr << "Use right foldevo version.\n";
+	    exit(DATA_ERROR);
+	}
 
 	// Check that simulations_per_gen agrees with number of processors
 	if (simulations_per_gen != g_world_size)
@@ -713,25 +796,36 @@ int main(int argc, char** argv)
 	}
 
 	// need to trim json log if it's too long
+	// also, we will reconstruct recorded_fitnesses
 	int checkpoint_generation;
 	checkpoint.at("generation").get_to(checkpoint_generation);
 	auto it = json_log.at("trajectory").begin();
+	std::string curr_seq = it->at("aa sequence");
+	std::string new_seq;
 	while (it != json_log.at("trajectory").end() &&
 	       it->at("generation") <= checkpoint_generation)
 	{
+	    new_seq = it->at("aa sequence");
+	    if (it->at("accepted"))
+	    {
+		recorded_fitnesses[curr_seq] = it->at("old fitness");
+		curr_seq = new_seq;
+	    }
+	    else
+	    {
+		recorded_fitnesses[new_seq] = it->at("new fitness");
+	    }
 	    ++it;
 	}
+
+	// auto it2 = it;
+	// for (; it2 != json_log.at("trajectory").end(); ++it2)
+	// {
+	//     recorded_fitnesses.erase(it2->at("aa sequence"));
+	// }
+
 	json_log.at("trajectory").erase(it, json_log.at("trajectory").end());
 
-	// for (auto it = json_log.at("trajectory").begin();
-	//      it != json_log.at("trajectory").end();
-	//      ++it)
-	// {
-	//     if (it->at("generation") > checkpoint_generation)
-	//     {
-	// 	json_log.at("trajectory").erase(it);
-	//     }
-	// }
     }
     
     // End option parsing
@@ -740,8 +834,9 @@ int main(int argc, char** argv)
 
     // Process the user-provided sequence
     std::vector<int> nuc_sequence;
-    std::vector<int> prev_nuc_sequence;
+    std::vector<int> old_nuc_sequence;
     std::vector<AminoAcid> aa_sequence;
+    std::vector<AminoAcid> old_aa_sequence;
     std::vector<Codon> codon_sequence;
 
     // Infer lengths from folded conformation length
@@ -750,8 +845,9 @@ int main(int argc, char** argv)
 
     // Resize vectors
     nuc_sequence.resize(nuc_length);
-    prev_nuc_sequence.resize(nuc_length);
+    old_nuc_sequence.resize(nuc_length);
     aa_sequence.resize(protein_length);
+    old_aa_sequence.resize(protein_length); // for recorded_fitnesses
     codon_sequence.resize(protein_length);
 
     if (!resume_from_checkpoint)
@@ -814,9 +910,9 @@ int main(int argc, char** argv)
     else			// resuming from checkpoint
     {
 	nuc_sequence.clear();
-	prev_nuc_sequence.clear();
+	old_nuc_sequence.clear();
 	checkpoint.at("nuc sequence").get_to(nuc_sequence);
-	checkpoint.at("previous nuc sequence").get_to(prev_nuc_sequence);
+	checkpoint.at("old nuc sequence").get_to(old_nuc_sequence);
 	NucSeqToAASeq(nuc_sequence.data(), nuc_length, aa_sequence.data());
     }
 
@@ -849,7 +945,9 @@ int main(int argc, char** argv)
 	    json_log["simulations per gen"] = g_world_size;
 	    json_log["reevaluation size"] = reevaluation_size;
 	    json_log["degradation timescale"] = degradation_param;
-	    json_log["latpack path"] = latpack_path;
+	    json_log["fitness constant"] = fitness_constant;
+	    json_log["latpack share path"] = getenv("LATPACK_SHARE");
+	    json_log["foldevo share path"] = getenv("FOLDEVO_SHARE");
 	    json_log["translation params"] = speedparams_path;
 	    json_log["instant ribosome release"] = instant_ribosome_release;
 	    json_log["rng seed"] = rng_seed;
@@ -866,8 +964,10 @@ int main(int argc, char** argv)
 	    << "# simulations (no. reevaluations): " << g_world_size <<
 	    " (" << reevaluation_size << ")" << std::endl
 	    << "# degradation timescale : " << degradation_param << std::endl
+	    << "# fitness constant : " << fitness_constant << std::endl
 	    << "# rng seed : " << rng_seed << std::endl
 	    << "# translation params : " << speedparams_path << std::endl
+	    << "# latpack share : " << getenv("LATPACK_SHARE") << std::endl
 	    ;
 	print_header(outstream, aa_sequence, nuc_sequence); 
     }
@@ -877,25 +977,35 @@ int main(int argc, char** argv)
     // The probability of posttranslation degradation is 1 - exp(-t/tau)
     // where tau = degradation_param and t = time since translation
     // (ribosome release).
-    // Set it to be log(8) * tau. (87.5% probability of degradation).
-    int posttranslational_folding_time = log(8) * degradation_param;
+    // Set it to be log(32) * tau. (96.875% probability of degradation).
+    int posttranslational_folding_time = log(32) * degradation_param;
+    // // no, instead we set it to be a fixed value
+    // posttranslational_folding_time = DEFAULT_POSTTRANSLATION_TIME;
+    double degradation_scale_steps = degradation_param * protein_length;
     int gen = 0;
     int old_total_translation_steps;
     int total_translation_steps;
     int last_accepted_gen = 0;
     int n_gens_without_accept = 0;
     int mutation_type = -1;
-    double old_fitness = 0.001;
+    double old_fitness = 0.0000001;
     double fitness;
-    double old_folded_fraction = 0;
-    double folded_fraction;
+    double old_protein_output = 0;
+    double protein_output;
+    double pnat_average;
+    double old_pnat_average = 0;
+    double pnat_weight;
+    double old_pnat_weight;
     double native_energy;
     double selection;
     double fixation;
     std::string translation_schedule;
+    std::vector<double> folding_times;
+    std::vector<double> old_folding_times;
     std::vector<std::string> latfoldvec_command;
-    std::vector<std::string> prev_latfoldvec_command;
-    std::unique_ptr<char []> aa_sequence_str(new char[protein_length+1]);
+    std::vector<std::string> old_latfoldvec_command;
+    std::unique_ptr<char []> aa_sequence_str(new char[protein_length+1]); // the current trial sequence
+    std::unique_ptr<char []> old_aa_sequence_str(new char[protein_length+1]); // the current accepted
 
     if (resume_from_checkpoint)
     {
@@ -908,9 +1018,12 @@ int main(int argc, char** argv)
 	    n_gens_without_accept);
 	checkpoint.at("mutation type").get_to(mutation_type);
 	checkpoint.at("old fitness").get_to(old_fitness);
-	checkpoint.at("old folded fraction").get_to(old_folded_fraction);
-	checkpoint.at("prev latfoldvec command").get_to(
-	    prev_latfoldvec_command);
+	checkpoint.at("old protein output").get_to(old_protein_output);
+	checkpoint.at("old latfoldvec command").get_to(
+	    old_latfoldvec_command);
+	checkpoint.at("old pnat average").get_to(old_pnat_average);
+	checkpoint.at("old pnat weight").get_to(old_pnat_weight);
+	checkpoint.at("old folding times").get_to(old_folding_times);
     }
 
     // Begin running simulation loop
@@ -928,14 +1041,18 @@ int main(int argc, char** argv)
 	PrintAASequence(
 	    aa_sequence_str.get(), aa_sequence.data(), protein_length);
 	latfoldvec_command = compose_latfoldvec_command(
-	    latpack_path,
 	    aa_sequence_str.get(),
 	    folded_conformation,
 	    translation_schedule,
 	    posttranslational_folding_time,
 	    temperature,
 	    latfold_output_frequency,
-	    save_conformations);
+	    degradation_scale_steps);
+
+	// Reset these variables for new eval
+	pnat_average = 0;
+	pnat_weight = 0;
+	folding_times.clear();
 
 	if (proc_does_reevaluation && gen > 0)
 	{
@@ -947,16 +1064,18 @@ int main(int argc, char** argv)
 			     << std::setw(5) << n_gens_without_accept + 1
 			     << "_" << std::setw(5) << g_subcomm_rank << ".h5";
 
-	    run_latfoldvec(prev_latfoldvec_command, hdf5_output_file.str());
-	    folded_fraction = evaluate_folded_fraction(
-		hdf5_output_file.str(), old_total_translation_steps,
-		degradation_param, &native_energy);
+	    run_latfoldvec(old_latfoldvec_command, hdf5_output_file.str());
+	    old_protein_output = get_protein_output_avg(
+		hdf5_output_file.str(), &native_energy,
+		degradation_param, protein_length, old_total_translation_steps,
+		&old_pnat_average, &old_pnat_weight, old_folding_times);
 
-	    // Now update old fitness
-	    old_folded_fraction = reaverage_folded_fraction(
-		old_folded_fraction, folded_fraction, g_subcomm_size,
-		g_world_size, n_gens_without_accept);
-	    old_fitness = calculate_fitness(old_folded_fraction);
+	    // // Now update old fitness
+	    // old_protein_output = reaverage_protein_output(
+	    // 	old_protein_output, protein_output, g_subcomm_size,
+	    // 	g_world_size, n_gens_without_accept);
+	    old_fitness = calculate_fitness(
+		old_protein_output, fitness_constant);
 	}
 	else if (!proc_does_reevaluation)
 	{
@@ -987,16 +1106,39 @@ int main(int argc, char** argv)
 			     << "_" << std::setw(5) << g_subcomm_rank << ".h5";
 
 	    run_latfoldvec(latfoldvec_command, hdf5_output_file.str());
-	    folded_fraction = evaluate_folded_fraction(
-		hdf5_output_file.str(), total_translation_steps,
-		degradation_param, &native_energy);
-	    fitness = calculate_fitness(folded_fraction);
+	    protein_output = get_protein_output_avg(
+		hdf5_output_file.str(), &native_energy,
+		degradation_param, protein_length, total_translation_steps,
+		&pnat_average, &pnat_weight, folding_times);
+	    fitness = calculate_fitness(
+		protein_output, fitness_constant);
 	}
+
+	// Synchronize data between all ranks, including between
+	// reevaluators and evaluators. ranks [0, reevaluation_size)
+	// looks at old sequence whereas [reevaluation_size,
+	// g_world_size) does new evaluation
 	MPI_Bcast(&native_energy, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
 	MPI_Bcast(&fitness, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
-	MPI_Bcast(&folded_fraction, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
+	MPI_Bcast(&protein_output, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
+	MPI_Bcast(&pnat_average, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
+	MPI_Bcast(&pnat_weight, 1, MPI_DOUBLE, g_world_size - 1, MPI_COMM_WORLD);
 	MPI_Bcast(&old_fitness, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-	MPI_Bcast(&old_folded_fraction, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	MPI_Bcast(&old_protein_output, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	MPI_Bcast(&old_pnat_average, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	MPI_Bcast(&old_pnat_weight, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+	int folding_times_size = folding_times.size();
+	MPI_Bcast(&folding_times_size, 1, MPI_INT, g_world_size - 1, MPI_COMM_WORLD);
+	folding_times.resize(folding_times_size);
+	MPI_Bcast(folding_times.data(), folding_times_size, MPI_DOUBLE,
+		  g_world_size - 1, MPI_COMM_WORLD);
+
+	int old_folding_times_size = old_folding_times.size();
+	MPI_Bcast(&old_folding_times_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+	old_folding_times.resize(old_folding_times_size);
+	MPI_Bcast(old_folding_times.data(), old_folding_times_size, MPI_DOUBLE,
+		  0, MPI_COMM_WORLD);
 
 	selection = (fitness / old_fitness) - 1;
 	if (selection == 0.)
@@ -1020,8 +1162,8 @@ int main(int argc, char** argv)
 			fitness, native_energy, accept);
 	    save_state(json_log, gen, n_gens_without_accept, mutation_type,
 		       aa_sequence, nuc_sequence, old_fitness, fitness,
-		       old_folded_fraction, folded_fraction, native_energy,
-		       (bool)accept);
+		       old_protein_output, protein_output, old_pnat_average,
+		       pnat_average, native_energy, (bool)accept);
 	    if (gen % DEFAULT_JSON_OUTFREQ == 0)
 	    {
 		write_log(json_log, json_log_path);
@@ -1034,19 +1176,30 @@ int main(int argc, char** argv)
 	// Update / revert
 	if (accept)
 	{
-	    // Update so that nuc_sequence and fitness are fixed
-	    prev_nuc_sequence = nuc_sequence;
-	    prev_latfoldvec_command = latfoldvec_command;
+	    if (gen > 0)
+	    {
+		NucSeqToAASeq(old_nuc_sequence.data(), nuc_length, old_aa_sequence.data());
+		PrintAASequence(
+		    old_aa_sequence_str.get(), old_aa_sequence.data(), protein_length);
+		recorded_fitnesses[old_aa_sequence_str.get()] = old_fitness;
+	    }
+	    // Update old values to take on current sequence
+	    old_nuc_sequence = nuc_sequence;
+	    old_latfoldvec_command = latfoldvec_command;
 	    old_total_translation_steps = total_translation_steps;
-	    old_folded_fraction = folded_fraction;
+	    old_protein_output = protein_output;
 	    old_fitness = fitness;
 	    n_gens_without_accept = 0;
 	    last_accepted_gen = gen;
+	    old_pnat_average = pnat_average;
+	    old_pnat_weight = pnat_weight;
+	    old_folding_times = folding_times;
 	}
 	else
 	{
-	    // Revert
-	    nuc_sequence = prev_nuc_sequence;
+	    // Revert, saving the fitness value
+	    recorded_fitnesses[aa_sequence_str.get()] = fitness;
+	    nuc_sequence = old_nuc_sequence;
 	    n_gens_without_accept++;
 	}
 
@@ -1054,17 +1207,39 @@ int main(int argc, char** argv)
 	// independent rng streams for different nodes.
 	if (!g_world_rank)
 	{
-	    do
+	    // We check if mutant sequence has been encountered before.
+	    std::vector<int> new_nuc_sequence;
+	    std::vector<AminoAcid> new_aa_sequence;
+	    new_aa_sequence.resize(protein_length);
+	    int infinite_loop_checker = 0;
+	    while (true)
 	    {
-		std::vector<int> temp_sequence = nuc_sequence;
-		mutation_type = PointMutateNucSequence(
-		    nuc_sequence.data(), nuc_length);
-		if (mutation_type == mutation_mode)
+		new_nuc_sequence = mutate_sequence(nuc_sequence, mutation_mode);
+		NucSeqToAASeq(new_nuc_sequence.data(), nuc_length, new_aa_sequence.data());
+		PrintAASequence(
+		    aa_sequence_str.get(), new_aa_sequence.data(), protein_length);
+		auto result = recorded_fitnesses.find(aa_sequence_str.get());
+		if (result == recorded_fitnesses.end())
+		{
 		    break;
-		if (mutation_mode == MutateAll && mutation_type >= 0)
+		}
+		else
+		{
+		    if (result->second >= old_fitness)
+		    {
+			break;
+		    }
+		}
+
+		++infinite_loop_checker;
+		if (infinite_loop_checker > 10000)
+		{
+		    std::cerr << "# No new sequences / s>=0 sequences in 10000 mutation attempts. "
+			      << "Fitness maxima? Continuing with current mutant.\n";
 		    break;
-		nuc_sequence = temp_sequence;
-	    } while (true);
+		}
+	    }
+	    nuc_sequence = new_nuc_sequence;
 	}
 
 	MPI_Bcast(nuc_sequence.data(), nuc_sequence.size(), MPI_INT,
@@ -1075,7 +1250,7 @@ int main(int argc, char** argv)
 	NucSeqToAASeq(nuc_sequence.data(), nuc_length, aa_sequence.data());
 
 	// Need to save checkpoint
-	if (gen % checkpoint_frequency == 0)
+	if (gen % checkpoint_frequency == 0 || gen == n_gens)
 	{
 	    std::ostringstream checkpoint_path;
 	    checkpoint_path << out_path << "/checkpoint"<< std::setw(5)
@@ -1084,17 +1259,19 @@ int main(int argc, char** argv)
 
 	    checkpoint["generation"] = gen;
 	    checkpoint["nuc sequence"] = nuc_sequence;
-	    checkpoint["previous nuc sequence"] = prev_nuc_sequence;
+	    checkpoint["old nuc sequence"] = old_nuc_sequence;
 	    checkpoint["old total translation steps"] =
 		old_total_translation_steps;
 	    checkpoint["last accepted gen"] = last_accepted_gen;
-	    checkpoint["n gens without accept"] =
-		n_gens_without_accept;
+	    checkpoint["n gens without accept"] = n_gens_without_accept;
 	    checkpoint["mutation type"] = mutation_type;
 	    checkpoint["old fitness"] = old_fitness;
-	    checkpoint["old folded fraction"]
-		= old_folded_fraction;
-	    checkpoint["prev latfoldvec command"] = prev_latfoldvec_command;
+	    checkpoint["old protein output"] = old_protein_output;
+	    checkpoint["old latfoldvec command"] = old_latfoldvec_command;
+	    checkpoint["old pnat average"] = old_pnat_average;
+	    checkpoint["old pnat weight"] = old_pnat_weight;
+	    checkpoint["old folding times"] = old_folding_times;
+	    checkpoint["recorded fitnesses"] = recorded_fitnesses;
 	    write_checkpoint(checkpoint_path.str(), checkpoint);
 	}
     }
@@ -1102,6 +1279,8 @@ int main(int argc, char** argv)
     // finalize json log
     write_log(json_log, json_log_path);
     
+    MPI_Barrier(MPI_COMM_WORLD);
+
     MPI_Comm_free(&g_subcomm);
     MPI_Finalize();
 
@@ -1378,21 +1557,22 @@ std::string make_translation_schedule(
 // Build a vector of strings that are arguments to invoke
 // latFoldVec. Note arguments -seed and -outFile are not added here.
 std::vector<std::string> compose_latfoldvec_command(
-    const std::string& latpack_path,
     const std::string& aa_sequence,
     const std::string& folded_conformation,
     const std::string& translation_schedule,
-    const int& full_length_time,
-    const double& temperature,
-    const int& output_frequency,
-    bool save_conformations)
+    int full_length_time,
+    double temperature,
+    int output_frequency,
+    double degradation_scale)	// in steps
 {
     std::vector<std::string> command;
 
-    command.push_back(latpack_path + "/bin/latFoldVec");
-    command.push_back("-energyFile=" + latpack_path + "/share/latpack/MJ.txt");
+    command.push_back("latFoldVec");
+    std::string energyFileArg(getenv("LATPACK_SHARE"));
+    command.push_back("-energyFile=" + energyFileArg + "/MJ.txt");
     command.push_back("-seq=" + aa_sequence);
-    command.push_back("-final=" + folded_conformation);
+    command.push_back("-countTarget=" + folded_conformation);
+    command.push_back("-targetDegradationScale=" + std::to_string(degradation_scale));
     command.push_back("-elongationSchedule=" + translation_schedule);
     command.push_back("-kT=" + std::to_string(temperature));
     command.push_back("-maxStepsIncrease");
@@ -1400,14 +1580,15 @@ std::vector<std::string> compose_latfoldvec_command(
     command.push_back("-ribosomeRelease");
     command.push_back("-fullLengthSteps=" + std::to_string(full_length_time));
     command.push_back("-outFreq=" + std::to_string(output_frequency));
-    if (save_conformations)
-    {
-	command.push_back("-out=S");
-    }
-    else
-    {
-	command.push_back("-out=E");
-    }
+    command.push_back("-out=S");
+    // if (save_conformations)
+    // {
+    //     command.push_back("-out=S");
+    // }
+    // else
+    // {
+    // 	command.push_back("-out=E");
+    // }
     
     // Previously we did the what is commented out, but we want to
     // keep the command as a vector.
@@ -1562,123 +1743,222 @@ void run_latfoldvec(
 // }
 
 
-
-// Analyze latFoldVec simulations to determine a fitness value for
-// protein under evaluation.
-double evaluate_folded_fraction(
+// Analyze latFoldVec simulations to average protein output.
+// This is a parallel function.
+double get_protein_output_avg(
     const std::string& filename,
-    int total_translation_steps,
+    double* native_energy,
     double degradation_param,
-    double* native_energy)
+    double protein_length,
+    double total_translation_steps,
+    double* old_pnat_average,
+    double* old_pnat_weight,
+    std::vector<double> &folding_times,
+    double t_cell)
 {
-    int folded = 0;
-    int total_n_folded = 0;
-
     // We need to read data from HDF5 file
-    hid_t file_id = H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
-    hid_t group_id = H5Gopen2(file_id, "traj1", H5P_DEFAULT);
-    hid_t sequence_attr = H5Aopen(file_id, "Sequence", H5P_DEFAULT);
-    hid_t sequence_attr_t = H5Aget_type(sequence_attr);
-    size_t sequence_attr_size = H5Tget_size(sequence_attr_t);
-    size_t protein_length = sequence_attr_size - 1;
-    hid_t found_final_attr = H5Aopen(group_id, "Found final struct",
-				     H5P_DEFAULT);
-    hid_t strtype = H5Tcopy(H5T_C_S1);
-    H5Tset_size(strtype, 4);
-    hid_t last_step_attr = H5Aopen(group_id, "Last step", H5P_DEFAULT);
-    hid_t last_energy_attr = H5Aopen(group_id, "Last E", H5P_DEFAULT);
-
-    char found_final[4];
-    int last_step;
-    double last_energy;
-
-    H5Aread(found_final_attr, strtype, found_final);
-    H5Aread(last_energy_attr, H5T_NATIVE_DOUBLE, &last_energy);
-    H5Aread(last_step_attr, H5T_NATIVE_UINT, &last_step);
-
-    if (std::strncmp(found_final, "yes", 3) == 0)
+    int error_count = 0;
+    hid_t file_id;
+    while (error_count < 5)
     {
-	int posttranslation_steps = last_step - total_translation_steps;
-	if (posttranslation_steps < 0)
-	{
-	    folded = 1;
-	}
-	else
-	{
-	    double posttranslation_time =
-		posttranslation_steps / protein_length;
-	    double degradation_probability = 1 - exp(
-		-posttranslation_time / degradation_param);
-	    if (threefryrand() > degradation_probability)
-	    {
-		folded = 1;
-	    }
-	}
+	file_id = H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+	if (file_id >= 0)
+	    break;
+	sleep(5);
+	++error_count;
+    }
+    if (error_count > 5)
+    {
+	std::cerr << "Could not open file \"" << filename
+		  << "\" after 5 attempts.\n";
+	std::cerr << "Ending program.\n";
+	MPI_Abort(MPI_COMM_WORLD, IO_ERROR);	
+    }
+
+    hid_t group_id = H5Gopen2(file_id, "traj1", H5P_DEFAULT);
+
+    // Read relevant attributes from 'traj1'
+    hid_t pnat_attr = H5Aopen(group_id, "Fraction target conf",
+			      H5P_DEFAULT);
+    hid_t steps_attr = H5Aopen(group_id, "Steps to target",
+			       H5P_DEFAULT);
+    hid_t last_step_attr = H5Aopen(group_id, "Last step",
+				   H5P_DEFAULT);
+    hid_t conf_energy_attr = H5Aopen(group_id, "Target conf energy",
+				     H5P_DEFAULT);
+    double pnat = 0;
+    double steps_to_target = 0;
+    double last_step = 0;
+    double conf_energy = 0;
+
+    H5Aread(pnat_attr, H5T_NATIVE_DOUBLE, &pnat);
+    H5Aread(steps_attr, H5T_NATIVE_DOUBLE, &steps_to_target);
+    H5Aread(last_step_attr, H5T_NATIVE_DOUBLE, &last_step);
+    H5Aread(conf_energy_attr, H5T_NATIVE_DOUBLE, &conf_energy);
+
+    H5Aclose(conf_energy_attr);
+    H5Aclose(last_step_attr);
+    H5Aclose(steps_attr);
+    H5Aclose(pnat_attr);
+    H5Gclose(group_id);
+    H5Fclose(file_id);
+    // End reading hdf5 file
+
+    // Get a weighted average for pnat. Gather everything on root.
+    std::vector<double> pnats(g_subcomm_size);
+    std::vector<double> pnat_weights(g_subcomm_size);
+    std::vector<double> this_gen_folding_times(g_subcomm_size);
+    double pnat_weight;
+    double folding_time;
+    if (steps_to_target == 0)
+    {
+	pnat_weight = 0;
+	folding_time = -1;
+	// Use negative number to indicate failure to fold
+	// Easier for json serialization
     }
     else
     {
-	last_energy = 0;
+	pnat_weight = last_step - steps_to_target;
+	folding_time = (steps_to_target - total_translation_steps)
+	    / protein_length;
     }
-	
-    H5Tclose(strtype);
-    H5Tclose(sequence_attr_t);
-    H5Aclose(sequence_attr);
-    H5Aclose(found_final_attr);
-    H5Aclose(last_step_attr);
-    H5Aclose(last_energy_attr);    
-    H5Gclose(group_id);
-    H5Fclose(file_id);
 
-    if (g_subcomm_rank)
+    MPI_Gather(&pnat, 1, MPI_DOUBLE, pnats.data(),
+	       1, MPI_DOUBLE, 0, g_subcomm);
+    MPI_Gather(&pnat_weight, 1, MPI_DOUBLE, pnat_weights.data(),
+	       1, MPI_DOUBLE, 0, g_subcomm);
+    MPI_Gather(&folding_time, 1, MPI_DOUBLE, this_gen_folding_times.data(),
+	       1, MPI_DOUBLE, 0, g_subcomm);
+
+    double output_average;
+    if (g_subcomm_rank == 0)
     {
-	// Send whether trajectory folded
-	MPI_Send(&folded, 1, MPI_INT, 0, 0, g_subcomm);
-    }
-    else  // root node
-    {
-	total_n_folded += folded;
-	for (int i=1; i<g_subcomm_size; ++i)
+	double weighted_sum = 0;
+	double sum_weights = 0;
+	for (unsigned int i = 0; i < pnats.size(); ++i)
 	{
-	    MPI_Recv(&folded, 1, MPI_INT, MPI_ANY_SOURCE, 0,
-		     g_subcomm, &g_status);
-	    total_n_folded += folded;
+	    weighted_sum += pnats[i] * pnat_weights[i];
+	    sum_weights += pnat_weights[i];
 	}
+	pnat = weighted_sum / sum_weights;
+
+	if (std::isnan(pnat))
+	{
+	    pnat = 0;
+	}
+
+	// Now account for old:
+	pnat = pnat * sum_weights + *old_pnat_average * *old_pnat_weight;
+	*old_pnat_weight += sum_weights;
+	pnat /= *old_pnat_weight;
+	*old_pnat_average = pnat;
+
+	// Now calculate protein output on a per trajectory basis
+	folding_times.insert(folding_times.end(), this_gen_folding_times.begin(),
+			     this_gen_folding_times.end());
+
+	if (pnat == 1)
+	{
+	    pnat = 1 - 1e-10;
+	}
+
+	double total_output = 0;
+	for (auto folding_time : folding_times)
+	{
+	    if (folding_time < 0)
+	    {
+		continue;
+	    }
+	    double output = exp(-folding_time / degradation_param);
+	    output *= degradation_param * pnat / (1 - pnat);
+	    output *= (1 - exp(
+			   -(t_cell - folding_time)
+			   * (1 - pnat) / degradation_param)) / t_cell;
+	    total_output += output;
+	}
+	output_average = total_output / (double)folding_times.size();
     }
-    // Let everyone know total folded
-    MPI_Bcast(&total_n_folded, 1, MPI_INT, 0, g_subcomm);
-    double folded_fraction = total_n_folded / (double)g_subcomm_size;
+
+    // Now let everyone know
+    MPI_Bcast(old_pnat_average, 1, MPI_DOUBLE, 0, g_subcomm);
+    MPI_Bcast(old_pnat_weight, 1, MPI_DOUBLE, 0, g_subcomm);
+    MPI_Bcast(&output_average, 1, MPI_DOUBLE, 0, g_subcomm);
+    pnat = *old_pnat_average;
+
+    int folding_times_size = folding_times.size();
+    MPI_Bcast(&folding_times_size, 1, MPI_INT, 0, g_subcomm);
+    folding_times.resize(folding_times_size);
+    MPI_Bcast(folding_times.data(), folding_times_size, MPI_DOUBLE, 0, g_subcomm);
 
     // Also determine native energy
-    MPI_Allreduce(&last_energy, native_energy, 1, MPI_DOUBLE, MPI_MIN,
+    MPI_Allreduce(&conf_energy, native_energy, 1, MPI_DOUBLE, MPI_MIN,
 		  g_subcomm);
     
-    return folded_fraction;
+    return output_average;
 }
 
 
-// Calculate fitness from folded fraction.
+// Calculate fitness from protein output.
 double calculate_fitness(
-    double folded_fraction,
+    double protein_output,
     double f_0)
 {
-    return 0.001 + folded_fraction / (folded_fraction + f_0);    
+    // 0.0000001 (1e-7) to avoid divide by zero error
+    return 0.0000001 + protein_output / (protein_output + f_0);
+    // return 0.0000001 + protein_output;
 }
 
 
-// Update folded fraction to incorporate new folding simulations.
-double reaverage_folded_fraction(
-    double old_folded_fraction,
-    double new_folded_fraction,
-    int n_reevaluators,
-    int n_total,
-    int n_gens_without_accept)
+// // Update protein output to incorporate new folding simulations.
+// double reaverage_protein_output(
+//     double old_protein_output,
+//     double new_protein_output,
+//     int n_reevaluators,
+//     int n_total,
+//     int n_gens_without_accept)
+// {
+//     // We calculate a weighted average, so here we get the weights.
+//     double old_factor = (n_total + n_reevaluators * (n_gens_without_accept - 1))
+// 	/ (double)(n_total + n_gens_without_accept * n_reevaluators);
+//     double new_factor = n_reevaluators
+// 	/ (double)(n_total + n_gens_without_accept * n_reevaluators);
+//     return old_protein_output * old_factor + new_protein_output * new_factor;
+// }
+
+
+// Make a mutation
+std::vector<int> mutate_sequence(
+    const std::vector<int> & input_sequence,
+    MutationMode mutation_mode)
 {
-    // We calculate a weighted average, so here we get the weights.
-    double old_factor = (n_total + n_reevaluators * (n_gens_without_accept - 1))
-	/ (double)(n_total + n_gens_without_accept * n_reevaluators);
-    double new_factor = n_reevaluators
-	/ (double)(n_total + n_gens_without_accept * n_reevaluators);
-    return old_folded_fraction * old_factor + new_folded_fraction * new_factor;
+    std::vector<int> temp_sequence;
+    int mutation_type;
+    unsigned int nuc_length = input_sequence.size();
+    if (mutation_mode == NonsynonymousOnly)
+    {
+	temp_sequence = input_sequence;
+	AAMutateNucSequence(temp_sequence.data(), nuc_length);
+	// This function should always work.
+    }
+    else		// synonymousonly == 0, mutateall == 2
+    {
+	while (true)
+	{
+	    temp_sequence = input_sequence;
+	    mutation_type = PointMutateNucSequence(
+		temp_sequence.data(), nuc_length);
+	    if (mutation_type == mutation_mode)
+		// mutation_type == mutation_mode == 0
+		break;
+	    if (mutation_mode == MutateAll && mutation_type >= 0)
+		// either
+		// mutation_type == 0
+		// mutation_type == 1
+		break;
+	}
+    }
+    return temp_sequence;
 }
 
 
@@ -1713,7 +1993,7 @@ void print_header(
 
     *outstream << "# " << std::string(line_length, '-')<< std::endl;
 
-    *outstream << std::fixed << std::setprecision(2);
+    *outstream << std::fixed << std::setprecision(3);
     
     return;
 }
@@ -1741,8 +2021,10 @@ void print_state(
 	       << std::setw(5) << generation << " "
 	       << std::setw(aa_seq_len) << aa_seq_str.get() << " "
 	       << std::setw(nuc_seq_len) << nuc_seq_str.get() << " "
+	       << std::setprecision(5)
 	       << std::setw(8) << old_fitness << " "
 	       << std::setw(8) << new_fitness << " "
+	       << std::setprecision(2)
 	       << std::setw(7) << native_energy << " "	
 	       << std::setw(6) << ((accept) ? "yes" : "no")
 	       << std::endl;
@@ -1761,8 +2043,10 @@ void save_state(
     std::vector<int> & nuc_sequence,
     double old_fitness,
     double new_fitness,
-    double old_folded_fraction,
-    double new_folded_fraction,
+    double old_protein_output,
+    double new_protein_output,
+    double old_pnat,
+    double new_pnat,
     double native_energy,
     bool accept)
 {
@@ -1776,6 +2060,10 @@ void save_state(
     int n_evaluations =
 	n_gens_without_accept * (int)json_log["reevaluation size"]
 	+ (int)json_log["simulations per gen"];
+    if (generation == 0)
+    {
+	n_evaluations = 0;
+    }
 
     json entry;
     entry["generation"] = generation;
@@ -1785,8 +2073,10 @@ void save_state(
     entry["nuc sequence"] = nuc_seq_str.get();
     entry["old fitness"] = old_fitness;
     entry["new fitness"] = new_fitness;
-    entry["old folded fraction"] = old_folded_fraction;
-    entry["new folded fraction"] = new_folded_fraction;
+    entry["old protein output"] = old_protein_output;
+    entry["new protein output"] = new_protein_output;
+    entry["old pnat"] = old_pnat;
+    entry["new pnat"] = new_pnat;
     entry["native energy"] = native_energy;
     entry["accepted"] = accept;
     json_log["trajectory"].push_back(entry);

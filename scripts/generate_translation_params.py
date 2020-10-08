@@ -2,9 +2,10 @@
 """
 generate_translation_params.py
 
-Takes translation time data from Ciryam et al. (2013) PNAS, multiplies
-the times by a scaling factor, and outputs it as (codon, time) pairs
-for use as a parameter file for folding_evolution.
+Takes translation time data from Ciryam et al. (2013) PNAS (Table S1,
+24 min doubling time), multiplies the times by a scaling factor, and
+outputs it as (codon, time) pairs for use as a parameter file for
+folding_evolution.
 
 The codons are represented as hexadecimal numbers.
 
@@ -15,9 +16,13 @@ The codons are represented as hexadecimal numbers.
 import sys
 import datetime
 import argparse
+import collections
 import numpy as np
 
-translation_times = {           # in ms
+from Bio.Seq import Seq
+from Bio.Alphabet import IUPAC
+
+TRANSLATION_TIMES = {           # in ms
     "UUU": 99.0  ,
     "UUC": 156.4 ,
     "UUG": 42.1  ,
@@ -82,46 +87,116 @@ translation_times = {           # in ms
     "AAC": 114.6 ,
     "AAG": 94.7  ,
     "AAA": 59.1
-    }
+}
+
+# For simplified parameters. Mean of SLOW and FAST matches mean of the
+# numbers above (~110).
+SLOW = 200
+FAST = 20
 
 letter_to_num = {
-    'U' : 0,
-    'C' : 1,
-    'A' : 2,
-    'G' : 3
-    }
+    'U': 0,
+    'C': 1,
+    'A': 2,
+    'G': 3
+}
+
+
+def codon_to_aa(codon):
+    assert len(codon) == 3
+    seq_obj = Seq(codon, IUPAC.unambiguous_rna)
+    return seq_obj.translate()[0]
+
+
+def gather_codons():
+    """Collect codons by amino acid they encode."""
+    aa_to_codon = collections.defaultdict(list)
+    for codon in TRANSLATION_TIMES.keys():
+        aa_to_codon[codon_to_aa(codon)].append(codon)
+    return aa_to_codon
+
+
+def make_simplified_table():
+    """Make codon->translation time dict with simplified values.
+
+    """
+    aa_to_codon = gather_codons()
+    # Sort codons for each AA by translation time
+    by_fastest = {aa: sorted([(c, TRANSLATION_TIMES[c]) for c in codons],
+                             key=lambda x: x[-1])
+                  for aa, codons in aa_to_codon.items()}
+    simplified = {}
+
+    for aa, codons in by_fastest.items():
+        codons = [c[0] for c in codons]
+        # The number of fast codons, floor of half the total number of
+        # codons for the amino acid
+        num_fast = int(len(codons) / 2)
+        for c in codons[:num_fast]:
+            simplified[c] = FAST
+        for c in codons[num_fast:]:
+            simplified[c] = SLOW
+    return simplified
+
+
+def make_flat_table():
+    table = {}
+    for codon in TRANSLATION_TIMES:
+        table[codon] = FAST
+    return table
 
 
 def codon_triplet_to_int(triplet):
     n1 = letter_to_num[triplet[0]]
     n2 = letter_to_num[triplet[1]]
     n3 = letter_to_num[triplet[2]]
-    return (n1 << 8 ) | (n2 << 4) | n3;
+    return (n1 << 8) | (n2 << 4) | n3
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--scaling', type=float, default=1.)
+    parser.add_argument('--simplified', action='store_true',
+                        help="Generate simplified table with only two "
+                        "values for translation times.")
+    parser.add_argument('--flat', action='store_true',
+                        help="Generate table in which all codons use a single "
+                        "value for translation times.")
     return parser.parse_args()
 
+
 def main(args):
-    print "# Codon translation times"
-    print "# Scaling factor:", args.scaling
-    print "# Generated on:", datetime.date.today()
+    print("# Codon translation times%s" % (
+        " (simplified)" if args.simplified else ""))
+    print("# Scaling factor:", args.scaling)
+    print("# Generated on:", datetime.date.today())
     sys.stdout.write('# ')
-    print letter_to_num
+    print(letter_to_num)
+
     times = []
+    if args.simplified:
+        # Replace real data with simplified values
+        translation_times = make_simplified_table()
+    elif args.flat:
+        translation_times = make_flat_table()
+    else:
+        translation_times = TRANSLATION_TIMES
+
     for i, (codon, time) in enumerate(sorted(
-            translation_times.items(), key=lambda x: codon_triplet_to_int(x[0]))):
+            translation_times.items(),
+            key=lambda x: codon_triplet_to_int(x[0]))):
         if (i % 4) == 0:
-            print
+            print()
         codon_as_int = codon_triplet_to_int(codon)
         scaled_time = int(time) * args.scaling
         times.append(scaled_time)
-        print "0x{:04x} {:.0f}".format(codon_as_int, scaled_time)
-    print
-    print "# mean time:", np.mean(times)
-    print "# median time:", np.median(times)
+        print("0x{:04x} {:.0f}".format(codon_as_int, scaled_time))
+
+    print()
+    print("# mean time:", np.mean(times))
+    print("# median time:", np.median(times))
     return
 
+
 if __name__ == "__main__":
-    main(parse_args())
+    sys.exit(main(parse_args()))

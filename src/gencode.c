@@ -143,8 +143,8 @@ static Codon AAtoCodon(AminoAcid aa, int random)
     switch (aa)
     {
     case A_Cys: {
-        codons[1] = N_UGU;
-        codons[0] = N_UGC;
+        codons[0] = N_UGU;
+        codons[1] = N_UGC;
         break; }
     case A_Met: {
         codons[0] = N_AUG;
@@ -167,10 +167,10 @@ static Codon AAtoCodon(AminoAcid aa, int random)
         codons[0] = N_CUG;
         break; }
     case A_Val: {
-        codons[1] = N_GUU;
-        codons[2] = N_GUC;
-        codons[3] = N_GUA;
-        codons[0] = N_GUG;
+        codons[0] = N_GUU;
+        codons[1] = N_GUC;
+        codons[2] = N_GUA;
+        codons[3] = N_GUG;
         break; }
     case A_Trp: {
         codons[0] = N_UGG;
@@ -218,12 +218,12 @@ static Codon AAtoCodon(AminoAcid aa, int random)
         codons[1] = N_GAC;
         break; }
     case A_Glu: {
-        codons[0] = N_GAA;
-        codons[1] = N_GAG;
+        codons[1] = N_GAA;
+        codons[0] = N_GAG;
         break; }
     case A_His: {
-        codons[0] = N_CAU;
-        codons[1] = N_CAC;
+        codons[1] = N_CAU;
+        codons[0] = N_CAC;
         break; }
     case A_Arg: {
         codons[0] = N_CGU;
@@ -238,8 +238,8 @@ static Codon AAtoCodon(AminoAcid aa, int random)
         codons[1] = N_AAG;
         break; }
     case A_Pro: {
-        codons[0] = N_CCU;
-        codons[1] = N_CCC;
+        codons[1] = N_CCU;
+        codons[0] = N_CCC;
         codons[2] = N_CCA;
         codons[3] = N_CCG;
         break; }
@@ -492,6 +492,52 @@ int PointMutateCharNucSequence(char *NucSeq, int Len)
 
     j = 0;
     for (i=0; i<Len/3; i++)
+        if (AAS1[i] != AAS2[i])
+        {
+            j = 1;
+            break;
+        }
+
+    return j;
+}
+
+
+int AAMutateNucSequence(int *NucSeq, int Len)
+{
+    assert((Len % 3) == 0);
+    int aaLen = Len / 3;
+
+    AminoAcid AAS1[10000], AAS2[10000];
+    NucSeqToAASeq(NucSeq, Len, AAS1);
+
+    int aaToMutate = (int)(threefryrand() * aaLen);
+    AminoAcid currentAA = AAS1[aaToMutate];
+    AminoAcid newAA = currentAA;
+
+    do
+    {
+	newAA = (int)(threefryrand() * 20);
+    } while (newAA == currentAA);
+
+    /* Get new codon for new aa */
+    Codon newCodon = AAtoCodon(newAA, 0);
+
+    int n1, n2, n3;
+    /* Mask and bitshift to separate the three values */
+    n1 = (newCodon & 0x0f00) >> 8;
+    n2 = (newCodon & 0x00f0) >> 4;
+    n3 = (newCodon & 0x000f);
+
+    int codonStart = aaToMutate * 3;
+    NucSeq[codonStart] = n1;
+    NucSeq[codonStart + 1] = n2;
+    NucSeq[codonStart + 2] = n3;
+
+    /* Stuff that follows is unnecessary */
+    NucSeqToAASeq(NucSeq, Len, AAS2);
+
+    int i, j = 0;
+    for (i = 0; i < Len / 3; i++)
         if (AAS1[i] != AAS2[i])
         {
             j = 1;

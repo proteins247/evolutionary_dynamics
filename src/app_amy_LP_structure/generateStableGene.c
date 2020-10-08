@@ -70,7 +70,7 @@ int main(int argc, char *argv[])
     if (optind + 2 == argc)
     {
 	confC = atoi(argv[optind++]);
-	seed = atol(argv[optind]);
+	seed = strtoul(argv[optind], NULL, 10);
     }
     else
     {
@@ -163,7 +163,7 @@ int main(int argc, char *argv[])
 
 	sprintf(fname, "%d.sourceme", confC); 
 	out = fopen(fname, "w");
-	fprintf(out, "SEED=%lu\n", seed);
+	fprintf(out, "SEED_=%lu\n", seed); /* SEED_ so we dont inadvertently replace var SEED */
 	fprintf(out, "PNAT=%f\n", pnatC);
 	fprintf(out, "TDESIGN=%f\n", Tenv);
 	fprintf(out, "NATIVEENERGY=%f\n", energy);
