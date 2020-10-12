@@ -5,7 +5,8 @@ cotranslational folding.
 The main program, `folding_evolution`, is located at
 `src/app_folding_evolution/folding_evolution.cpp`. It is code for an
 MPI program. Supporting libraries are in `src`, although some are not
-used, and some code within `src` are from other projects. Some other
+used. These libraries were written by others in the Shakhnovich
+research group. I added a few functions to `gencode`. Some other
 evolutionary simulation code written by others for other research
 projects are in `src`.
 
@@ -13,7 +14,7 @@ To compile, an installation of HDF5 and MPI are needed. Furthermore,
 the software suite latPack, https://github.com/proteins247/latPack,
 must be installed. `install_folding_evolution.sh` is how I compile and
 install my `folding_evolution` executable as a module on the Harvard
-cluster; it should either be modified before use elsewhere.
+cluster; it should be modified before use elsewhere.
 
 # Repository branches
 Several variants of the code are located in different branches:

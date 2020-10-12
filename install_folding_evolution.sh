@@ -2,7 +2,7 @@
 
 # install_folding_evolution.sh
 
-# stand-in for a makefile at the moment
+# Install folding evolution programs as a personal module on the harvard rc cluster.
 
 # Example
 # DESCRIPTION="this is my description" ./install_folding_evolution.sh 0.0.1
